@@ -210,20 +210,27 @@ def train_pipeline(feature_path: str, ticker: str, arima_order=(5, 1, 0), seq_le
     joblib.dump(scaler, scaler_path)
     
     # Save some meta-info
+    from datetime import datetime
     meta_info = {
         'ticker': ticker,
         'arima_order': arima_order,
         'seq_length': seq_length,
-        'feature_cols': feature_cols
+        'feature_cols': feature_cols,
+        'accuracy': float(accuracy),
+        'train_size': int(len(train_df)),
+        'test_size': int(len(test_df)),
+        'epochs': epochs,
+        'trained_at': datetime.now().isoformat()
     }
     with open(f"models/meta_{ticker.lower()}.pkl", 'wb') as f:
         pickle.dump(meta_info, f)
-        
+    
     print("All models and preprocessing parameters successfully saved to 'models/' directory.")
     print(f"ARIMA: {arima_path}")
     print(f"LSTM: {lstm_path} (PyTorch)")
     print(f"LightGBM: {lgb_path}")
     print(f"Scaler: {scaler_path}")
+    return meta_info
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train hybrid ARIMA-LSTM and LightGBM model.")

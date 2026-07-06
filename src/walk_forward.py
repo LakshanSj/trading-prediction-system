@@ -167,7 +167,7 @@ def run_wfv(feature_path: str, train_size=750, test_size=250, step_size=250, seq
         
     if not results:
         print("No validation folds were successfully executed.")
-        return
+        return []
         
     avg_accuracy = np.mean([r['accuracy'] for r in results])
     avg_sharpe = np.mean([r['sharpe'] for r in results])
