@@ -34,6 +34,14 @@ def load_models(ticker: str, interval: str = "1d"):
     scaler_path = f"models/scaler_{t}_{i}.pkl"
     meta_path = f"models/meta_{t}_{i}.pkl"
     
+    # Legacy daily fallback
+    if i == "1d" and not os.path.exists(arima_path):
+        arima_path = f"models/arima_{t}.pkl"
+        lstm_path = f"models/lstm_{t}.pth"
+        lgb_path = f"models/lgb_{t}.txt"
+        scaler_path = f"models/scaler_{t}.pkl"
+        meta_path = f"models/meta_{t}.pkl"
+        
     if not (os.path.exists(arima_path) and os.path.exists(lstm_path) and os.path.exists(scaler_path) and os.path.exists(meta_path)):
         raise FileNotFoundError(f"Trained models not found for ticker '{ticker}' at interval '{interval}'. Please train models first.")
         
@@ -240,19 +248,18 @@ def run_monitoring(ticker: str, interval: str = "1d", alert_threshold=0.50, min_
         print(f"Prediction for next trading interval ({next_date_str}) already generated.")
     else:
         print(f"Generating prediction for next trading interval ({next_date_str})...")
-        # 1. ARIMA forecast:
-        arima_pred = arima_result.forecast(steps=1)[0]
-        
-        # 2. LSTM residual forecast:
+        # 1. ARIMA forecast & residuals:
         try:
             updated_arima = arima_result.apply(df_features['Close'].values)
+            arima_pred = updated_arima.forecast(steps=1)[0]
             # Ensure seq_length matches or fits dataset length
             seq_len = min(meta_info['seq_length'], len(df_features))
             recent_residuals = (df_features['Close'].values - updated_arima.fittedvalues)[-seq_len:]
         except Exception as e:
-            print(f"Warning: ARIMA apply failed: {e}. Using fallback residuals.")
+            print(f"Warning: ARIMA apply failed: {e}. Using fallback residuals and standard forecast.")
+            arima_pred = arima_result.forecast(steps=1)[0]
             seq_len = min(meta_info['seq_length'], len(df_features))
-            recent_residuals = (df_features['Close'].values - df_features['Close'].shift(1).fillna(method='bfill').values)[-seq_len:]
+            recent_residuals = (df_features['Close'].values - df_features['Close'].shift(1).bfill().values)[-seq_len:]
             
         scaled_residuals = scaler.transform(recent_residuals.reshape(-1, 1)).flatten()
         

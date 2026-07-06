@@ -228,10 +228,15 @@ else:
         last_row = df_features.iloc[-1]
         last_close = float(last_row['Close'])
         
-        arima_next_pred = arima_result.forecast(steps=1)[0]
-        
-        # PyTorch residual forecast
-        recent_residuals = (df_features['Close'].values - arima_result.predict(start=0, end=len(df_features)-1))[-meta_info['seq_length']:]
+        try:
+            updated_arima = arima_result.apply(df_features['Close'].values)
+            arima_next_pred = updated_arima.forecast(steps=1)[0]
+            recent_residuals = (df_features['Close'].values - updated_arima.fittedvalues)[-meta_info['seq_length']:]
+        except Exception as e:
+            st.warning(f"ARIMA apply failed: {e}. Falling back to default prediction.")
+            arima_next_pred = arima_result.forecast(steps=1)[0]
+            recent_residuals = (df_features['Close'].values - arima_result.predict(start=0, end=len(df_features)-1))[-meta_info['seq_length']:]
+            
         scaled_recent_res = scaler.transform(recent_residuals.reshape(-1, 1)).flatten()
         X_lstm_next = torch.tensor(scaled_recent_res.reshape((1, meta_info['seq_length'], 1)), dtype=torch.float32)
         

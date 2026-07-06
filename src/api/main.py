@@ -255,8 +255,15 @@ def get_predictions(ticker: str, interval: str = "1d"):
         
         # Make one-step out prediction (tomorrow)
         last_close = float(df.iloc[-1]['Close'])
-        arima_next_pred = arima_result.forecast(steps=1)[0]
-        recent_res = (df['Close'].values - arima_result.predict(start=0, end=len(df)-1))[-seq_len:]
+        try:
+            updated_arima = arima_result.apply(df['Close'].values)
+            arima_next_pred = updated_arima.forecast(steps=1)[0]
+            recent_res = (df['Close'].values - updated_arima.fittedvalues)[-seq_len:]
+        except Exception as e:
+            # Fallback if apply fails
+            arima_next_pred = arima_result.forecast(steps=1)[0]
+            recent_res = (df['Close'].values - arima_result.predict(start=0, end=len(df)-1))[-seq_len:]
+            
         scaled_recent_res = scaler.transform(recent_res.reshape(-1, 1)).flatten()
         X_lstm_next = torch.tensor(scaled_recent_res.reshape((1, seq_len, 1)), dtype=torch.float32)
         
