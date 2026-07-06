@@ -9,6 +9,7 @@ models/*.pkl
 models/*.h5
 models/*.keras
 models/*.txt
+models/*.pth
 logs/*.csv
 logs/*.log
 
@@ -21,3 +22,15 @@ ENV/
 .vscode/
 .idea/
 .gemini/
+
+# Firebase
+.firebase/
+firebase-debug.log
+
+# Frontend build output
+frontend/dist/
+frontend/node_modules/
+
+# Environment files (contain secrets/URLs)
+frontend/.env.production
+frontend/.env.local

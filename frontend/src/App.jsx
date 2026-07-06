@@ -32,7 +32,16 @@ import {
 } from 'recharts';
 import './App.css';
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+// Helper wrapper to skip ngrok browser warnings programmatically
+const apiFetch = (url, options = {}) => {
+  const headers = {
+    ...options.headers,
+    'ngrok-skip-browser-warning': 'true'
+  };
+  return fetch(url, { ...options, headers });
+};
 
 function App() {
   // Input states
@@ -67,7 +76,7 @@ function App() {
   useEffect(() => {
     const checkConnection = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/`);
+        const res = await apiFetch(`${API_BASE_URL}/`);
         if (res.ok) {
           setBackendStatus('connected');
         } else {
@@ -85,7 +94,7 @@ function App() {
   // Fetch Ticker Status & Active Data
   const loadTickerStatus = async (symbol) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/ticker-status?ticker=${symbol}`);
+      const res = await apiFetch(`${API_BASE_URL}/api/ticker-status?ticker=${symbol}`);
       const data = await res.json();
       setTickerStatus(data);
       
@@ -121,7 +130,7 @@ function App() {
     setLogMessages(["Training initiated on server...", "Awaiting data download..."]);
     pollIntervalRef.current = setInterval(async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/api/ticker-status?ticker=${symbol}`);
+        const res = await apiFetch(`${API_BASE_URL}/api/ticker-status?ticker=${symbol}`);
         const data = await res.json();
         setTickerStatus(data);
         
@@ -161,14 +170,14 @@ function App() {
     setGeneralLoading(true);
     try {
       // Fetch Predictions
-      const predRes = await fetch(`${API_BASE_URL}/api/predictions?ticker=${symbol}`);
+      const predRes = await apiFetch(`${API_BASE_URL}/api/predictions?ticker=${symbol}`);
       if (predRes.ok) {
         const predData = await predRes.json();
         setPredictionData(predData);
       }
 
       // Fetch Explainability
-      const expRes = await fetch(`${API_BASE_URL}/api/explainability?ticker=${symbol}`);
+      const expRes = await apiFetch(`${API_BASE_URL}/api/explainability?ticker=${symbol}`);
       if (expRes.ok) {
         const expData = await expRes.json();
         setExplainData(expData);
@@ -192,7 +201,7 @@ function App() {
     setTrainLoading(true);
     setLogMessages(["Sending training request to backend..."]);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/train`, {
+      const res = await apiFetch(`${API_BASE_URL}/api/train`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -218,7 +227,7 @@ function App() {
   const triggerWfv = async () => {
     setWfvLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/wfv`, {
+      const res = await apiFetch(`${API_BASE_URL}/api/wfv`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -244,7 +253,7 @@ function App() {
   const triggerMonitoring = async () => {
     setMonitorLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/monitor?ticker=${ticker}`, {
+      const res = await apiFetch(`${API_BASE_URL}/api/monitor?ticker=${ticker}`, {
         method: 'POST'
       });
       if (res.ok) {
