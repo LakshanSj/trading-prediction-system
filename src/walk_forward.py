@@ -52,10 +52,17 @@ def run_wfv(feature_path: str, train_size=750, test_size=250, step_size=250, seq
     df = df.sort_values('Date').reset_index(drop=True)
     
     total_len = len(df)
-    print(f"Total rows available: {total_len}. Train size = {train_size}, Test size = {test_size}, Step size = {step_size}")
+    print(f"Total rows available: {total_len}. Original parameters: Train size = {train_size}, Test size = {test_size}, Step size = {step_size}")
     
     if total_len < (train_size + test_size):
-        raise ValueError(f"Insufficient data ({total_len} rows) for train_size ({train_size}) and test_size ({test_size}).")
+        # Dynamically adjust train/test/step size if the dataset is small!
+        # E.g. train_size = 60% of total_len, test_size = 20% of total_len, step_size = test_size
+        train_size = int(total_len * 0.6)
+        test_size = int(total_len * 0.2)
+        step_size = test_size
+        print(f"Adjusted WFV parameters due to small dataset: Train size = {train_size}, Test size = {test_size}, Step size = {step_size}")
+        if train_size < 10 or test_size < 3:
+            raise ValueError(f"Insufficient data ({total_len} rows) even after dynamic scaling for walk-forward validation.")
         
     start_idx = 0
     fold = 1
@@ -89,7 +96,13 @@ def run_wfv(feature_path: str, train_size=750, test_size=250, step_size=250, seq
         scaled_residuals = scaler.fit_transform(train_residuals).flatten()
         
         # 3. Create sequences for LSTM
-        X_lstm, y_lstm = create_lstm_sequences(scaled_residuals, seq_length)
+        # Adjust seq_length if it exceeds scaled_residuals length
+        fold_seq_length = seq_length
+        if len(scaled_residuals) <= fold_seq_length:
+            fold_seq_length = max(2, len(scaled_residuals) // 2)
+            print(f"Adjusted sequence length for fold to {fold_seq_length}")
+            
+        X_lstm, y_lstm = create_lstm_sequences(scaled_residuals, fold_seq_length)
         
         # Convert to PyTorch tensors
         X_tensor = torch.tensor(X_lstm, dtype=torch.float32).unsqueeze(-1) # shape (samples, seq_length, 1)
@@ -118,8 +131,8 @@ def run_wfv(feature_path: str, train_size=750, test_size=250, step_size=250, seq
         scaled_test_residuals = scaler.transform(test_residuals).flatten()
         
         # Prepare LSTM inputs for test
-        full_residuals = np.concatenate([scaled_residuals[-seq_length:], scaled_test_residuals])
-        X_test_lstm, _ = create_lstm_sequences(full_residuals, seq_length)
+        full_residuals = np.concatenate([scaled_residuals[-fold_seq_length:], scaled_test_residuals])
+        X_test_lstm, _ = create_lstm_sequences(full_residuals, fold_seq_length)
         X_test_tensor = torch.tensor(X_test_lstm, dtype=torch.float32).unsqueeze(-1)
         
         # Predict LSTM (PyTorch inference)

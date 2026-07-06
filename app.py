@@ -65,15 +65,27 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Helper function to check if models exist
-def models_exist(ticker: str) -> bool:
-    ticker = ticker.lower()
-    return (
-        os.path.exists(f"models/arima_{ticker}.pkl") and
-        os.path.exists(f"models/lstm_{ticker}.pth") and
-        os.path.exists(f"models/lgb_{ticker}.txt") and
-        os.path.exists(f"models/scaler_{ticker}.pkl") and
-        os.path.exists(f"models/meta_{ticker}.pkl")
+def models_exist(ticker: str, interval: str = "1d") -> bool:
+    t = ticker.lower()
+    i = interval.lower()
+    new_format = (
+        os.path.exists(f"models/arima_{t}_{i}.pkl") and
+        os.path.exists(f"models/lstm_{t}_{i}.pth") and
+        os.path.exists(f"models/lgb_{t}_{i}.txt") and
+        os.path.exists(f"models/scaler_{t}_{i}.pkl") and
+        os.path.exists(f"models/meta_{t}_{i}.pkl")
     )
+    if new_format:
+        return True
+    if i == "1d":
+        return (
+            os.path.exists(f"models/arima_{t}.pkl") and
+            os.path.exists(f"models/lstm_{t}.pth") and
+            os.path.exists(f"models/lgb_{t}.txt") and
+            os.path.exists(f"models/scaler_{t}.pkl") and
+            os.path.exists(f"models/meta_{t}.pkl")
+        )
+    return False
 
 # Header Section
 st.title("📈 AI Stock Trend Prediction System")
@@ -82,6 +94,17 @@ st.markdown("A hybrid ARIMA-LSTM forecasting framework with LightGBM-SHAP explai
 # Sidebar Configuration
 st.sidebar.header("⚙️ Configuration")
 ticker_input = st.sidebar.text_input("Stock Ticker", value="AAPL").strip().upper()
+
+# Interval selection
+interval_input = st.sidebar.selectbox("Data Interval / Timeframe", 
+    options=["5m", "30m", "1h", "3h", "12h", "1d", "3d", "1wk"], 
+    index=5,
+    format_func=lambda x: {
+        "5m": "5 Minutes", "30m": "30 Minutes", "1h": "1 Hour", 
+        "3h": "3 Hours", "12h": "12 Hours", "1d": "1 Day (Daily)", 
+        "3d": "3 Days", "1wk": "1 Week (Weekly)"
+    }[x]
+)
 
 # Dates selection
 col1, col2 = st.sidebar.columns(2)
@@ -105,7 +128,7 @@ if train_btn:
     with st.status(f"Pipeline running for {ticker_input}...", expanded=True) as status:
         st.write("📥 Fetching historical data from Yahoo Finance...")
         try:
-            raw_path = fetch_data(ticker_input, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
+            raw_path = fetch_data(ticker_input, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"), interval=interval_input)
             st.write(f"Raw data saved to {raw_path}")
             
             st.write("🛠️ Engineering technical features...")
@@ -113,26 +136,36 @@ if train_btn:
             st.write(f"Feature-engineered data saved to {features_path}")
             
             st.write("🤖 Training Hybrid ARIMA-LSTM & LightGBM Models...")
-            train_pipeline(features_path, ticker_input, epochs=epochs_input)
+            train_pipeline(features_path, ticker_input, interval=interval_input, epochs=epochs_input)
             
             status.update(label="Training complete! Models saved.", state="complete", expanded=True)
-            st.success(f"Models successfully trained and saved for {ticker_input}!")
+            st.success(f"Models successfully trained and saved for {ticker_input} ({interval_input})!")
         except Exception as e:
             status.update(label="Pipeline failed!", state="error", expanded=True)
             st.error(f"Error during training pipeline: {e}")
 
 # Check if model has been trained for this ticker
-if not models_exist(ticker_input):
-    st.info(f"👈 Model for ticker **{ticker_input}** is not trained yet. Please configure the dates and click **'Fetch Data & Train Model'** in the sidebar to begin!")
+if not models_exist(ticker_input, interval_input):
+    st.info(f"👈 Model for ticker **{ticker_input}** at interval **{interval_input}** is not trained yet. Please configure the settings and click **'Fetch Data & Train Model'** in the sidebar to begin!")
 else:
     # Load Models and Meta info
     try:
-        arima_path = f"models/arima_{ticker_input.lower()}.pkl"
-        lstm_path = f"models/lstm_{ticker_input.lower()}.pth"
-        lgb_path = f"models/lgb_{ticker_input.lower()}.txt"
-        scaler_path = f"models/scaler_{ticker_input.lower()}.pkl"
-        meta_path = f"models/meta_{ticker_input.lower()}.pkl"
+        t_low = ticker_input.lower()
+        i_low = interval_input.lower()
+        arima_path = f"models/arima_{t_low}_{i_low}.pkl"
+        lstm_path = f"models/lstm_{t_low}_{i_low}.pth"
+        lgb_path = f"models/lgb_{t_low}_{i_low}.txt"
+        scaler_path = f"models/scaler_{t_low}_{i_low}.pkl"
+        meta_path = f"models/meta_{t_low}_{i_low}.pkl"
         
+        # Legacy daily fallback
+        if i_low == "1d" and not os.path.exists(arima_path):
+            arima_path = f"models/arima_{t_low}.pkl"
+            lstm_path = f"models/lstm_{t_low}.pth"
+            lgb_path = f"models/lgb_{t_low}.txt"
+            scaler_path = f"models/scaler_{t_low}.pkl"
+            meta_path = f"models/meta_{t_low}.pkl"
+            
         with open(arima_path, 'rb') as f:
             arima_result = pickle.load(f)
             
@@ -147,7 +180,9 @@ else:
             meta_info = pickle.load(f)
             
         # Load Features for Dashboard rendering
-        features_path = f"data/features_{ticker_input.lower()}.csv"
+        features_path = f"data/features_{t_low}_{i_low}.csv"
+        if i_low == "1d" and not os.path.exists(features_path):
+            features_path = f"data/features_{t_low}.csv"
         df_features = pd.read_csv(features_path)
         df_features['Date'] = pd.to_datetime(df_features['Date'])
         
@@ -170,9 +205,9 @@ else:
     # Run Monitoring handler
     if monitor_btn:
         st.markdown("---")
-        with st.spinner(f"Running Monitoring update for {ticker_input}..."):
+        with st.spinner(f"Running Monitoring update for {ticker_input} ({interval_input})..."):
             try:
-                run_monitoring(ticker_input)
+                run_monitoring(ticker_input, interval=interval_input)
                 st.success("Daily monitoring simulation run complete!")
             except Exception as e:
                 st.error(f"Error running monitor: {e}")
@@ -273,36 +308,80 @@ else:
         
         # Plotly Actual vs Predicted
         st.subheader("Historical vs Out-of-Sample Predictions (Test Set)")
+        
+        # Interactive chart range filtering controls
+        zoom_opt = st.radio("Zoom Range", ["All", "1w", "3d", "1d", "12h", "3h", "1h", "30min", "5min", "Custom"], horizontal=True)
+        
+        filtered_df = test_df.copy()
+        train_df_subset = df_features.iloc[max(0, split_idx-100):split_idx].copy()
+        filtered_train_subset = train_df_subset.copy()
+        
+        if zoom_opt != "All":
+            max_date = df_features['Date'].max()
+            if zoom_opt == "1w":
+                start_limit = max_date - timedelta(days=7)
+            elif zoom_opt == "3d":
+                start_limit = max_date - timedelta(days=3)
+            elif zoom_opt == "1d":
+                start_limit = max_date - timedelta(days=1)
+            elif zoom_opt == "12h":
+                start_limit = max_date - timedelta(hours=12)
+            elif zoom_opt == "3h":
+                start_limit = max_date - timedelta(hours=3)
+            elif zoom_opt == "1h":
+                start_limit = max_date - timedelta(hours=1)
+            elif zoom_opt == "30min":
+                start_limit = max_date - timedelta(minutes=30)
+            elif zoom_opt == "5min":
+                start_limit = max_date - timedelta(minutes=5)
+            elif zoom_opt == "Custom":
+                col_c1, col_c2 = st.columns(2)
+                with col_c1:
+                    custom_start = st.text_input("Custom Start Date/Time", value=str(max_date - timedelta(days=5)))
+                with col_c2:
+                    custom_end = st.text_input("Custom End Date/Time", value=str(max_date))
+                try:
+                    start_limit = pd.to_datetime(custom_start)
+                    end_limit = pd.to_datetime(custom_end)
+                    filtered_df = filtered_df[(filtered_df['Date'] >= start_limit) & (filtered_df['Date'] <= end_limit)]
+                    filtered_train_subset = filtered_train_subset[(filtered_train_subset['Date'] >= start_limit) & (filtered_train_subset['Date'] <= end_limit)]
+                except:
+                    st.warning("Invalid custom dates.")
+                    start_limit = None
+            
+            if zoom_opt != "Custom":
+                filtered_df = filtered_df[filtered_df['Date'] >= start_limit]
+                filtered_train_subset = filtered_train_subset[filtered_train_subset['Date'] >= start_limit]
+                
         fig = go.Figure()
         
-        # Train close (last 100 days of train for context)
-        train_df_subset = df_features.iloc[max(0, split_idx-100):split_idx]
+        # Train close context
         fig.add_trace(go.Scatter(
-            x=train_df_subset['Date'], 
-            y=train_df_subset['Close'],
+            x=filtered_train_subset['Date'], 
+            y=filtered_train_subset['Close'],
             name="Train Actual Close", 
             line=dict(color="#8a909d", width=2)
         ))
         
         # Test actual close
         fig.add_trace(go.Scatter(
-            x=test_df['Date'], 
-            y=test_df['Close'],
+            x=filtered_df['Date'], 
+            y=filtered_df['Close'],
             name="Test Actual Close", 
             line=dict(color="#00e676", width=2)
         ))
         
         # Test predicted close
         fig.add_trace(go.Scatter(
-            x=test_df['Date'], 
-            y=test_df['Hybrid_Pred'],
+            x=filtered_df['Date'], 
+            y=filtered_df['Hybrid_Pred'],
             name="Test Hybrid Predict Close", 
             line=dict(color="#2979ff", width=2, dash='dash')
         ))
         
         fig.update_layout(
             template="plotly_dark",
-            title=f"Actual vs predicted stock price for {ticker_input}",
+            title=f"Actual vs predicted stock price for {ticker_input} ({interval_input})",
             xaxis_title="Date",
             yaxis_title="Stock Price ($)",
             hovermode="x unified",

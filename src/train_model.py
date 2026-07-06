@@ -69,7 +69,7 @@ def train_lstm_model(X_train, y_train, seq_length, epochs=15, batch_size=32):
             
     return model
 
-def train_pipeline(feature_path: str, ticker: str, arima_order=(5, 1, 0), seq_length=10, epochs=15, batch_size=32):
+def train_pipeline(feature_path: str, ticker: str, interval: str = "1d", arima_order=(5, 1, 0), seq_length=10, epochs=15, batch_size=32):
     """
     Runs the training pipeline:
     1. Loads features and splits data chronologically (80% train, 20% test).
@@ -89,6 +89,11 @@ def train_pipeline(feature_path: str, ticker: str, arima_order=(5, 1, 0), seq_le
     split_idx = int(len(df) * 0.8)
     train_df = df.iloc[:split_idx].copy()
     test_df = df.iloc[split_idx:].copy()
+    
+    # Dynamic seq_length adjustment if dataset is short
+    if len(train_df) <= seq_length:
+        seq_length = max(2, len(train_df) // 2)
+        print(f"Adjusted seq_length to {seq_length} due to small dataset.")
     
     print(f"Data Split: Train size = {len(train_df)}, Test size = {len(test_df)}")
     
@@ -191,10 +196,12 @@ def train_pipeline(feature_path: str, ticker: str, arima_order=(5, 1, 0), seq_le
     # --- 5. Save all models ---
     os.makedirs("models", exist_ok=True)
     
-    arima_path = f"models/arima_{ticker.lower()}.pkl"
-    lstm_path = f"models/lstm_{ticker.lower()}.pth" # Saved as PyTorch weights
-    lgb_path = f"models/lgb_{ticker.lower()}.txt"
-    scaler_path = f"models/scaler_{ticker.lower()}.pkl"
+    t_lower = ticker.lower()
+    i_lower = interval.lower()
+    arima_path = f"models/arima_{t_lower}_{i_lower}.pkl"
+    lstm_path = f"models/lstm_{t_lower}_{i_lower}.pth" # Saved as PyTorch weights
+    lgb_path = f"models/lgb_{t_lower}_{i_lower}.txt"
+    scaler_path = f"models/scaler_{t_lower}_{i_lower}.pkl"
     
     # Save ARIMA
     with open(arima_path, 'wb') as f:
@@ -213,6 +220,7 @@ def train_pipeline(feature_path: str, ticker: str, arima_order=(5, 1, 0), seq_le
     from datetime import datetime
     meta_info = {
         'ticker': ticker,
+        'interval': interval,
         'arima_order': arima_order,
         'seq_length': seq_length,
         'feature_cols': feature_cols,
@@ -222,7 +230,7 @@ def train_pipeline(feature_path: str, ticker: str, arima_order=(5, 1, 0), seq_le
         'epochs': epochs,
         'trained_at': datetime.now().isoformat()
     }
-    with open(f"models/meta_{ticker.lower()}.pkl", 'wb') as f:
+    with open(f"models/meta_{t_lower}_{i_lower}.pkl", 'wb') as f:
         pickle.dump(meta_info, f)
     
     print("All models and preprocessing parameters successfully saved to 'models/' directory.")
@@ -236,12 +244,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train hybrid ARIMA-LSTM and LightGBM model.")
     parser.add_argument("--features", type=str, required=True, help="Path to feature-engineered CSV file")
     parser.add_argument("--ticker", type=str, required=True, help="Stock ticker symbol")
+    parser.add_argument("--interval", type=str, default="1d", help="Data interval/timeframe")
     parser.add_argument("--epochs", type=int, default=15, help="Number of LSTM training epochs")
     
     args = parser.parse_args()
     
     try:
-        train_pipeline(args.features, args.ticker, epochs=args.epochs)
+        train_pipeline(args.features, args.ticker, interval=args.interval, epochs=args.epochs)
     except Exception as e:
         print(f"Error during training: {e}")
         import traceback

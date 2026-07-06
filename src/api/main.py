@@ -40,49 +40,67 @@ training_status = {}
 
 class TrainRequest(BaseModel):
     ticker: str
+    interval: str = "1d"
     start_date: str = "2015-01-01"
     end_date: str = None
     epochs: int = 15
 
 class WfvRequest(BaseModel):
     ticker: str
+    interval: str = "1d"
     train_size: int = 750
     test_size: int = 250
     step_size: int = 250
     epochs: int = 5
 
-def models_exist(ticker: str) -> bool:
+def models_exist(ticker: str, interval: str = "1d") -> bool:
     t = ticker.lower()
-    return (
-        os.path.exists(os.path.join(PROJECT_ROOT, f"models/arima_{t}.pkl")) and
-        os.path.exists(os.path.join(PROJECT_ROOT, f"models/lstm_{t}.pth")) and
-        os.path.exists(os.path.join(PROJECT_ROOT, f"models/lgb_{t}.txt")) and
-        os.path.exists(os.path.join(PROJECT_ROOT, f"models/scaler_{t}.pkl")) and
-        os.path.exists(os.path.join(PROJECT_ROOT, f"models/meta_{t}.pkl"))
+    i = interval.lower()
+    # Check new format with interval suffix
+    new_format = (
+        os.path.exists(os.path.join(PROJECT_ROOT, f"models/arima_{t}_{i}.pkl")) and
+        os.path.exists(os.path.join(PROJECT_ROOT, f"models/lstm_{t}_{i}.pth")) and
+        os.path.exists(os.path.join(PROJECT_ROOT, f"models/lgb_{t}_{i}.txt")) and
+        os.path.exists(os.path.join(PROJECT_ROOT, f"models/scaler_{t}_{i}.pkl")) and
+        os.path.exists(os.path.join(PROJECT_ROOT, f"models/meta_{t}_{i}.pkl"))
     )
+    if new_format:
+        return True
+    # Fallback to legacy files for daily data
+    if i == "1d":
+        return (
+            os.path.exists(os.path.join(PROJECT_ROOT, f"models/arima_{t}.pkl")) and
+            os.path.exists(os.path.join(PROJECT_ROOT, f"models/lstm_{t}.pth")) and
+            os.path.exists(os.path.join(PROJECT_ROOT, f"models/lgb_{t}.txt")) and
+            os.path.exists(os.path.join(PROJECT_ROOT, f"models/scaler_{t}.pkl")) and
+            os.path.exists(os.path.join(PROJECT_ROOT, f"models/meta_{t}.pkl"))
+        )
+    return False
 
-def run_train_task(ticker: str, start_date: str, end_date: str, epochs: int):
+def run_train_task(ticker: str, start_date: str, end_date: str, epochs: int, interval: str = "1d"):
     ticker_upper = ticker.upper()
     # Change to project root so relative paths in train_pipeline work correctly
     orig_cwd = os.getcwd()
     os.chdir(PROJECT_ROOT)
     try:
-        training_status[ticker_upper] = {"status": "running", "message": "Fetching data from yfinance..."}
-        raw_path = fetch_data(ticker_upper, start_date, end_date)
+        status_key = f"{ticker_upper}_{interval.upper()}"
+        training_status[status_key] = {"status": "running", "message": "Fetching data from yfinance..."}
+        raw_path = fetch_data(ticker_upper, start_date, end_date, interval=interval)
         
-        training_status[ticker_upper] = {"status": "running", "message": "Engineering technical features..."}
+        training_status[status_key] = {"status": "running", "message": "Engineering technical features..."}
         features_path = engineer_features(raw_path)
         
-        training_status[ticker_upper] = {"status": "running", "message": "Training hybrid models (ARIMA-LSTM & LightGBM)..."}
-        meta_info = train_pipeline(features_path, ticker_upper, epochs=epochs)
+        training_status[status_key] = {"status": "running", "message": "Training hybrid models (ARIMA-LSTM & LightGBM)..."}
+        meta_info = train_pipeline(features_path, ticker_upper, interval=interval, epochs=epochs)
         
-        training_status[ticker_upper] = {
+        training_status[status_key] = {
             "status": "trained",
             "message": f"Successfully trained model for {ticker_upper}!",
             "meta": meta_info
         }
     except Exception as e:
-        training_status[ticker_upper] = {"status": "failed", "message": str(e)}
+        status_key = f"{ticker_upper}_{interval.upper()}"
+        training_status[status_key] = {"status": "failed", "message": str(e)}
     finally:
         os.chdir(orig_cwd)
 
@@ -91,14 +109,15 @@ def read_root():
     return {"status": "healthy", "service": "Trading Prediction Backend API"}
 
 @app.get("/api/ticker-status")
-def get_ticker_status(ticker: str):
+def get_ticker_status(ticker: str, interval: str = "1d"):
     ticker_upper = ticker.upper()
+    status_key = f"{ticker_upper}_{interval.upper()}"
     
     # Check if there is an active training run
-    if ticker_upper in training_status:
-        state = training_status[ticker_upper]
+    if status_key in training_status:
+        state = training_status[status_key]
         if state["status"] == "running":
-            return {"status": "training", "message": state["message"]}
+            return {"status": "running", "message": state["message"]}
         elif state["status"] == "failed":
             return {"status": "failed", "message": state["message"]}
         elif state["status"] == "trained":
@@ -108,6 +127,7 @@ def get_ticker_status(ticker: str):
                 "status": "trained",
                 "meta": {
                     "ticker": meta_info.get("ticker"),
+                    "interval": meta_info.get("interval", "1d"),
                     "trained_at": meta_info.get("trained_at"),
                     "accuracy": meta_info.get("accuracy"),
                     "train_size": meta_info.get("train_size"),
@@ -116,17 +136,23 @@ def get_ticker_status(ticker: str):
                 }
             }
             
-    if not models_exist(ticker_upper):
+    if not models_exist(ticker_upper, interval):
         return {"status": "untrained", "message": "No model found for this ticker."}
         
     try:
-        meta_path = os.path.join(PROJECT_ROOT, f"models/meta_{ticker_upper.lower()}.pkl")
+        t = ticker_upper.lower()
+        i = interval.lower()
+        meta_path = os.path.join(PROJECT_ROOT, f"models/meta_{t}_{i}.pkl")
+        if i == "1d" and not os.path.exists(meta_path):
+            meta_path = os.path.join(PROJECT_ROOT, f"models/meta_{t}.pkl")
+            
         with open(meta_path, 'rb') as f:
             meta_info = pickle.load(f)
         return {
             "status": "trained",
             "meta": {
                 "ticker": meta_info.get("ticker"),
+                "interval": meta_info.get("interval", "1d"),
                 "trained_at": meta_info.get("trained_at"),
                 "accuracy": meta_info.get("accuracy"),
                 "train_size": meta_info.get("train_size"),
@@ -142,26 +168,36 @@ def train_model(req: TrainRequest, background_tasks: BackgroundTasks):
     ticker_upper = req.ticker.upper()
     end = req.end_date or datetime.today().strftime("%Y-%m-%d")
     
-    if ticker_upper in training_status and training_status[ticker_upper]["status"] == "running":
-        return {"success": False, "message": "Training is already in progress for this ticker."}
+    status_key = f"{ticker_upper}_{req.interval.upper()}"
+    if status_key in training_status and training_status[status_key]["status"] == "running":
+        return {"success": False, "message": "Training is already in progress for this ticker/interval."}
         
-    background_tasks.add_task(run_train_task, ticker_upper, req.start_date, end, req.epochs)
-    training_status[ticker_upper] = {"status": "running", "message": "In queue..."}
-    return {"success": True, "message": f"Started background training pipeline for {ticker_upper}."}
+    background_tasks.add_task(run_train_task, ticker_upper, req.start_date, end, req.epochs, req.interval)
+    training_status[status_key] = {"status": "running", "message": "In queue..."}
+    return {"success": True, "message": f"Started background training pipeline for {ticker_upper} ({req.interval})."}
 
 @app.get("/api/predictions")
-def get_predictions(ticker: str):
+def get_predictions(ticker: str, interval: str = "1d"):
     ticker_upper = ticker.upper()
-    if not models_exist(ticker_upper):
-        raise HTTPException(status_code=400, detail=f"Model for {ticker_upper} is not trained yet.")
+    if not models_exist(ticker_upper, interval):
+        raise HTTPException(status_code=400, detail=f"Model for {ticker_upper} ({interval}) is not trained yet.")
         
     try:
-        # Load features, models, scaler, meta (all paths resolved from project root)
-        arima_path = os.path.join(PROJECT_ROOT, f"models/arima_{ticker_upper.lower()}.pkl")
-        lstm_path = os.path.join(PROJECT_ROOT, f"models/lstm_{ticker_upper.lower()}.pth")
-        scaler_path = os.path.join(PROJECT_ROOT, f"models/scaler_{ticker_upper.lower()}.pkl")
-        meta_path = os.path.join(PROJECT_ROOT, f"models/meta_{ticker_upper.lower()}.pkl")
+        t = ticker_upper.lower()
+        i = interval.lower()
         
+        # Load features, models, scaler, meta (all paths resolved from project root)
+        arima_path = os.path.join(PROJECT_ROOT, f"models/arima_{t}_{i}.pkl")
+        lstm_path = os.path.join(PROJECT_ROOT, f"models/lstm_{t}_{i}.pth")
+        scaler_path = os.path.join(PROJECT_ROOT, f"models/scaler_{t}_{i}.pkl")
+        meta_path = os.path.join(PROJECT_ROOT, f"models/meta_{t}_{i}.pkl")
+        
+        if i == "1d" and not os.path.exists(arima_path):
+            arima_path = os.path.join(PROJECT_ROOT, f"models/arima_{t}.pkl")
+            lstm_path = os.path.join(PROJECT_ROOT, f"models/lstm_{t}.pth")
+            scaler_path = os.path.join(PROJECT_ROOT, f"models/scaler_{t}.pkl")
+            meta_path = os.path.join(PROJECT_ROOT, f"models/meta_{t}.pkl")
+            
         with open(arima_path, 'rb') as f:
             arima_result = pickle.load(f)
             
@@ -174,9 +210,12 @@ def get_predictions(ticker: str):
         with open(meta_path, 'rb') as f:
             meta_info = pickle.load(f)
             
-        features_path = os.path.join(PROJECT_ROOT, f"data/features_{ticker_upper.lower()}.csv")
+        features_path = os.path.join(PROJECT_ROOT, f"data/features_{t}_{i}.csv")
+        if i == "1d" and not os.path.exists(features_path):
+            features_path = os.path.join(PROJECT_ROOT, f"data/features_{t}.csv")
+            
         if not os.path.exists(features_path):
-            raise HTTPException(status_code=404, detail=f"Feature dataset not found for {ticker_upper}.")
+            raise HTTPException(status_code=404, detail=f"Feature dataset not found for {ticker_upper} ({interval}).")
             
         df = pd.read_csv(features_path)
         df['Date'] = pd.to_datetime(df['Date'])
@@ -202,8 +241,8 @@ def get_predictions(ticker: str):
         full_residuals = np.concatenate([scaled_train_residuals[-seq_len:], scaled_test_residuals])
         
         X_lstm = []
-        for i in range(len(full_residuals) - seq_len):
-            X_lstm.append(full_residuals[i:(i + seq_len)])
+        for i_idx in range(len(full_residuals) - seq_len):
+            X_lstm.append(full_residuals[i_idx:(i_idx + seq_len)])
         X_lstm = np.array(X_lstm)
         
         with torch.no_grad():
@@ -227,13 +266,17 @@ def get_predictions(ticker: str):
         predicted_close_next = arima_next_pred + lstm_next_pred
         predicted_direction_next = "Up" if predicted_close_next > last_close else "Down"
         
+        # Check if dataset has intraday dates to determine formatting
+        is_intraday = df['Date'].dt.time.nunique() > 1
+        date_format = '%Y-%m-%d %H:%M' if is_intraday else '%Y-%m-%d'
+        
         # Format history and out-of-sample data for charts (last 100 days train + all test)
         train_df_subset = df.iloc[max(0, split_idx - 100):split_idx].copy()
         
         history = []
         for _, row in train_df_subset.iterrows():
             history.append({
-                "date": row['Date'].strftime('%Y-%m-%d'),
+                "date": row['Date'].strftime(date_format),
                 "close": float(row['Close']),
                 "type": "train"
             })
@@ -241,7 +284,7 @@ def get_predictions(ticker: str):
         predictions = []
         for idx, row in test_df.iterrows():
             predictions.append({
-                "date": row['Date'].strftime('%Y-%m-%d'),
+                "date": row['Date'].strftime(date_format),
                 "actual": float(row['Close']),
                 "arima": float(row['ARIMA_Pred']),
                 "hybrid": float(row['Hybrid_Pred']),
@@ -267,17 +310,29 @@ def get_predictions(ticker: str):
         raise HTTPException(status_code=500, detail=f"Failed to generate prediction data: {e}")
 
 @app.get("/api/explainability")
-def get_explainability(ticker: str):
+def get_explainability(ticker: str, interval: str = "1d"):
     ticker_upper = ticker.upper()
-    if not models_exist(ticker_upper):
-        raise HTTPException(status_code=400, detail=f"Model for {ticker_upper} is not trained yet.")
+    if not models_exist(ticker_upper, interval):
+        raise HTTPException(status_code=400, detail=f"Model for {ticker_upper} ({interval}) is not trained yet.")
         
     try:
+        t = ticker_upper.lower()
+        i = interval.lower()
+        
         # Load LightGBM model and features (paths resolved from project root)
-        lgb_path = os.path.join(PROJECT_ROOT, f"models/lgb_{ticker_upper.lower()}.txt")
+        lgb_path = os.path.join(PROJECT_ROOT, f"models/lgb_{t}_{i}.txt")
+        meta_path = os.path.join(PROJECT_ROOT, f"models/meta_{t}_{i}.pkl")
+        
+        if i == "1d" and not os.path.exists(lgb_path):
+            lgb_path = os.path.join(PROJECT_ROOT, f"models/lgb_{t}.txt")
+            meta_path = os.path.join(PROJECT_ROOT, f"models/meta_{t}.pkl")
+            
         lgb_model = lgb.Booster(model_file=lgb_path)
         
-        features_path = os.path.join(PROJECT_ROOT, f"data/features_{ticker_upper.lower()}.csv")
+        features_path = os.path.join(PROJECT_ROOT, f"data/features_{t}_{i}.csv")
+        if i == "1d" and not os.path.exists(features_path):
+            features_path = os.path.join(PROJECT_ROOT, f"data/features_{t}.csv")
+            
         df = pd.read_csv(features_path)
         
         feature_cols = [
@@ -322,9 +377,14 @@ def get_explainability(ticker: str):
 @app.post("/api/wfv")
 def run_wfv_endpoint(req: WfvRequest):
     ticker_upper = req.ticker.upper()
-    features_path = os.path.join(PROJECT_ROOT, f"data/features_{ticker_upper.lower()}.csv")
+    t_lower = ticker_upper.lower()
+    i_lower = req.interval.lower()
+    features_path = os.path.join(PROJECT_ROOT, f"data/features_{t_lower}_{i_lower}.csv")
+    if i_lower == "1d" and not os.path.exists(features_path):
+        features_path = os.path.join(PROJECT_ROOT, f"data/features_{t_lower}.csv")
+        
     if not os.path.exists(features_path):
-        raise HTTPException(status_code=400, detail=f"Feature dataset not found for {ticker_upper}. Please train the model first.")
+        raise HTTPException(status_code=400, detail=f"Feature dataset not found for {ticker_upper} ({req.interval}). Please train the model first.")
         
     try:
         wfv_results = run_wfv(
@@ -342,8 +402,8 @@ def run_wfv_endpoint(req: WfvRequest):
                 "accuracy": float(r["accuracy"]),
                 "sharpe": float(r["sharpe"]),
                 "max_dd": float(r["max_dd"]),
-                "start_date": r["start_date"].strftime('%Y-%m-%d'),
-                "end_date": r["end_date"].strftime('%Y-%m-%d')
+                "start_date": r["start_date"].strftime('%Y-%m-%d %H:%M') if getattr(r["start_date"], 'hour', 0) > 0 else r["start_date"].strftime('%Y-%m-%d'),
+                "end_date": r["end_date"].strftime('%Y-%m-%d %H:%M') if getattr(r["end_date"], 'hour', 0) > 0 else r["end_date"].strftime('%Y-%m-%d')
             })
             
         avg_accuracy = float(np.mean([r['accuracy'] for r in wfv_results])) if wfv_results else 0
@@ -360,21 +420,26 @@ def run_wfv_endpoint(req: WfvRequest):
         raise HTTPException(status_code=500, detail=f"Error running walk-forward validation: {e}")
 
 @app.post("/api/monitor")
-def run_monitoring_endpoint(ticker: str):
+def run_monitoring_endpoint(ticker: str, interval: str = "1d"):
     ticker_upper = ticker.upper()
-    if not models_exist(ticker_upper):
-        raise HTTPException(status_code=400, detail=f"Model for {ticker_upper} is not trained yet.")
+    if not models_exist(ticker_upper, interval):
+        raise HTTPException(status_code=400, detail=f"Model for {ticker_upper} ({interval}) is not trained yet.")
         
     try:
         # Change to project root so monitor.py can find model/data files with relative paths
         orig_cwd = os.getcwd()
         os.chdir(PROJECT_ROOT)
         try:
-            run_monitoring(ticker_upper)
+            run_monitoring(ticker_upper, interval)
         finally:
             os.chdir(orig_cwd)
         
-        log_path = os.path.join(PROJECT_ROOT, f"logs/monitoring_{ticker_upper.lower()}.csv")
+        t_lower = ticker_upper.lower()
+        i_lower = interval.lower()
+        log_path = os.path.join(PROJECT_ROOT, f"logs/monitoring_{t_lower}_{i_lower}.csv")
+        if i_lower == "1d" and not os.path.exists(log_path):
+            log_path = os.path.join(PROJECT_ROOT, f"logs/monitoring_{t_lower}.csv")
+            
         if not os.path.exists(log_path):
             raise HTTPException(status_code=500, detail="Monitoring update completed but failed to save output log.")
             

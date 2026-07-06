@@ -14,7 +14,8 @@ import {
   Calendar, 
   HelpCircle,
   ShieldAlert,
-  ArrowRight
+  ArrowRight,
+  History
 } from 'lucide-react';
 import { 
   LineChart, 
@@ -34,6 +35,16 @@ import './App.css';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
+// Global suggestions list for popular Stock & Crypto tokens
+const SUGGESTIONS = [
+  // Stocks
+  'AAPL', 'MSFT', 'TSLA', 'GOOG', 'NVDA', 'AMZN', 'META', 'NFLX', 'AMD', 'INTC', 
+  'COIN', 'HOOD', 'PYPL', 'SQ', 'MSTR',
+  // Crypto
+  'BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD', 'DOGE-USD', 'ADA-USD', 'BNB-USD', 
+  'LTC-USD', 'DOT-USD', 'AVAX-USD', 'LINK-USD', 'SHIB-USD', 'TRX-USD'
+];
+
 // Helper wrapper to skip ngrok browser warnings programmatically
 const apiFetch = (url, options = {}) => {
   const headers = {
@@ -51,6 +62,23 @@ function App() {
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [epochs, setEpochs] = useState(15);
   
+  // Timeframe and chart zoom states
+  const [intervalVal, setIntervalVal] = useState('1d');
+  const [chartZoom, setChartZoom] = useState('all');
+  const [customZoomStart, setCustomZoomStart] = useState('');
+  const [customZoomEnd, setCustomZoomEnd] = useState('');
+  
+  // Suggestions & history states
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [recentTickers, setRecentTickers] = useState(() => {
+    try {
+      const saved = localStorage.getItem('recent_tickers');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
   // Navigation & UI states
   const [activeTab, setActiveTab] = useState('predictions');
   const [backendStatus, setBackendStatus] = useState('checking');
@@ -91,10 +119,29 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Update recent searches list when ticker changes
+  useEffect(() => {
+    if (ticker) {
+      setRecentTickers(prev => {
+        const next = [ticker, ...prev.filter(t => t !== ticker)].slice(0, 5);
+        localStorage.setItem('recent_tickers', JSON.stringify(next));
+        return next;
+      });
+    }
+  }, [ticker]);
+
+  // Filter suggestions dynamically
+  const filteredSuggestions = tickerInput.trim()
+    ? SUGGESTIONS.filter(item => 
+        item.toLowerCase().startsWith(tickerInput.trim().toLowerCase()) && 
+        item.toUpperCase() !== ticker.toUpperCase()
+      ).slice(0, 5)
+    : [];
+
   // Fetch Ticker Status & Active Data
-  const loadTickerStatus = async (symbol) => {
+  const loadTickerStatus = async (symbol, currentInterval) => {
     try {
-      const res = await apiFetch(`${API_BASE_URL}/api/ticker-status?ticker=${symbol}`);
+      const res = await apiFetch(`${API_BASE_URL}/api/ticker-status?ticker=${symbol}&interval=${currentInterval}`);
       const data = await res.json();
       setTickerStatus(data);
       
@@ -102,12 +149,12 @@ function App() {
         setTrainLoading(true);
         // Start polling if not already polling
         if (!pollIntervalRef.current) {
-          startStatusPolling(symbol);
+          startStatusPolling(symbol, currentInterval);
         }
       } else if (data.status === 'trained') {
         setTrainLoading(false);
         // Load predictions & explainability automatically
-        fetchPredictionAndExplainability(symbol);
+        fetchPredictionAndExplainability(symbol, currentInterval);
       } else {
         setTrainLoading(false);
         // Clean data if untrained
@@ -120,17 +167,17 @@ function App() {
   };
 
   useEffect(() => {
-    loadTickerStatus(ticker);
+    loadTickerStatus(ticker, intervalVal);
     return () => stopStatusPolling();
-  }, [ticker]);
+  }, [ticker, intervalVal]);
 
   // Polling logic for background training status
-  const startStatusPolling = (symbol) => {
+  const startStatusPolling = (symbol, currentInterval) => {
     stopStatusPolling();
     setLogMessages(["Training initiated on server...", "Awaiting data download..."]);
     pollIntervalRef.current = setInterval(async () => {
       try {
-        const res = await apiFetch(`${API_BASE_URL}/api/ticker-status?ticker=${symbol}`);
+        const res = await apiFetch(`${API_BASE_URL}/api/ticker-status?ticker=${symbol}&interval=${currentInterval}`);
         const data = await res.json();
         setTickerStatus(data);
         
@@ -148,7 +195,7 @@ function App() {
           if (data.status === 'trained') {
             setLogMessages(prev => [...prev, "Training completed successfully!", "Saved models to disk."]);
             setTicker(symbol); // Refresh data
-            fetchPredictionAndExplainability(symbol);
+            fetchPredictionAndExplainability(symbol, currentInterval);
           } else {
             setLogMessages(prev => [...prev, `Training failed: ${data.message}`]);
           }
@@ -166,18 +213,18 @@ function App() {
     }
   };
 
-  const fetchPredictionAndExplainability = async (symbol) => {
+  const fetchPredictionAndExplainability = async (symbol, currentInterval) => {
     setGeneralLoading(true);
     try {
       // Fetch Predictions
-      const predRes = await apiFetch(`${API_BASE_URL}/api/predictions?ticker=${symbol}`);
+      const predRes = await apiFetch(`${API_BASE_URL}/api/predictions?ticker=${symbol}&interval=${currentInterval}`);
       if (predRes.ok) {
         const predData = await predRes.json();
         setPredictionData(predData);
       }
 
       // Fetch Explainability
-      const expRes = await apiFetch(`${API_BASE_URL}/api/explainability?ticker=${symbol}`);
+      const expRes = await apiFetch(`${API_BASE_URL}/api/explainability?ticker=${symbol}&interval=${currentInterval}`);
       if (expRes.ok) {
         const expData = await expRes.json();
         setExplainData(expData);
@@ -206,6 +253,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ticker: ticker,
+          interval: intervalVal,
           start_date: startDate,
           end_date: endDate,
           epochs: epochs
@@ -213,7 +261,7 @@ function App() {
       });
       const data = await res.json();
       if (data.success) {
-        startStatusPolling(ticker);
+        startStatusPolling(ticker, intervalVal);
       } else {
         setLogMessages(prev => [...prev, `Error: ${data.message}`]);
         setTrainLoading(false);
@@ -232,6 +280,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ticker: ticker,
+          interval: intervalVal,
           epochs: 5
         })
       });
@@ -253,7 +302,7 @@ function App() {
   const triggerMonitoring = async () => {
     setMonitorLoading(true);
     try {
-      const res = await apiFetch(`${API_BASE_URL}/api/monitor?ticker=${ticker}`, {
+      const res = await apiFetch(`${API_BASE_URL}/api/monitor?ticker=${ticker}&interval=${intervalVal}`, {
         method: 'POST'
       });
       if (res.ok) {
@@ -271,13 +320,13 @@ function App() {
     }
   };
 
-  // Chart Data preparation
+  // Chart Data preparation and dynamic timeframe slicing
   const getPredictionChartData = () => {
     if (!predictionData) return [];
     
     const chartData = [];
     
-    // Add history (last 100 days train)
+    // Add history
     predictionData.history.forEach(item => {
       chartData.push({
         date: item.date,
@@ -297,7 +346,43 @@ function App() {
       });
     });
     
-    return chartData;
+    if (chartZoom === 'all' || chartData.length === 0) {
+      return chartData;
+    }
+    
+    // Find the latest date object in the chart dataset to slice relative to it
+    const parsedDates = chartData.map(d => ({ ...d, parsedDate: new Date(d.date) }));
+    const maxDateMs = Math.max(...parsedDates.map(d => d.parsedDate.getTime()));
+    const maxDate = new Date(maxDateMs);
+    
+    let filterStartMs = 0;
+    
+    if (chartZoom === '1w') {
+      filterStartMs = maxDate.getTime() - (7 * 24 * 60 * 60 * 1000);
+    } else if (chartZoom === '3d') {
+      filterStartMs = maxDate.getTime() - (3 * 24 * 60 * 60 * 1000);
+    } else if (chartZoom === '1d') {
+      filterStartMs = maxDate.getTime() - (1 * 24 * 60 * 60 * 1000);
+    } else if (chartZoom === '12h') {
+      filterStartMs = maxDate.getTime() - (12 * 60 * 60 * 1000);
+    } else if (chartZoom === '3h') {
+      filterStartMs = maxDate.getTime() - (3 * 60 * 60 * 1000);
+    } else if (chartZoom === '1h') {
+      filterStartMs = maxDate.getTime() - (1 * 60 * 60 * 1000);
+    } else if (chartZoom === '30min') {
+      filterStartMs = maxDate.getTime() - (30 * 60 * 1000);
+    } else if (chartZoom === '5min') {
+      filterStartMs = maxDate.getTime() - (5 * 60 * 1000);
+    } else if (chartZoom === 'custom') {
+      const customStart = customZoomStart ? new Date(customZoomStart).getTime() : 0;
+      const customEnd = customZoomEnd ? new Date(customZoomEnd).getTime() : Infinity;
+      return parsedDates.filter(d => {
+        const time = d.parsedDate.getTime();
+        return time >= customStart && time <= customEnd;
+      });
+    }
+    
+    return parsedDates.filter(d => d.parsedDate.getTime() >= filterStartMs);
   };
 
   return (
@@ -327,13 +412,39 @@ function App() {
           <div className="panel-section">
             <h2 className="section-title"><Search size={16} /> Asset Lookup</h2>
             <form onSubmit={handleSearchSubmit} className="search-form">
-              <input 
-                type="text" 
-                value={tickerInput}
-                onChange={(e) => setTickerInput(e.target.value)}
-                placeholder="Ticker symbol (e.g. AAPL)"
-                disabled={trainLoading}
-              />
+              <div className="search-input-container">
+                <input 
+                  type="text" 
+                  value={tickerInput}
+                  onChange={(e) => {
+                    setTickerInput(e.target.value);
+                    setShowSuggestions(true);
+                  }}
+                  onFocus={() => setShowSuggestions(true)}
+                  onBlur={() => {
+                    // Small delay to allow clicking suggestions before dropdown closes
+                    setTimeout(() => setShowSuggestions(false), 200);
+                  }}
+                  placeholder="Ticker symbol (e.g. AAPL)"
+                  disabled={trainLoading}
+                />
+                {showSuggestions && filteredSuggestions.length > 0 && (
+                  <ul className="suggestions-list">
+                    {filteredSuggestions.map(sym => (
+                      <li 
+                        key={sym} 
+                        onMouseDown={() => {
+                          setTickerInput(sym);
+                          setTicker(sym);
+                          setShowSuggestions(false);
+                        }}
+                      >
+                        {sym}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
               <button type="submit" disabled={trainLoading} className="search-btn">
                 GO
               </button>
@@ -369,6 +480,26 @@ function App() {
                 ))}
               </div>
             </div>
+
+            {recentTickers.length > 0 && (
+              <div className="tag-group-container" style={{ marginTop: '10px' }}>
+                <span className="tag-group-label" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <History size={10} /> Recent Searches
+                </span>
+                <div className="ticker-tags">
+                  {recentTickers.map(sym => (
+                    <button 
+                      key={sym} 
+                      onClick={() => { setTickerInput(sym); setTicker(sym); }}
+                      className={`tag-btn ${ticker === sym ? 'active' : ''}`}
+                      disabled={trainLoading}
+                    >
+                      {sym}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="panel-section">
@@ -390,6 +521,25 @@ function App() {
                   disabled={trainLoading}
                 />
               </div>
+            </div>
+
+            <div className="config-group">
+              <label>Data Interval / Timeframe</label>
+              <select 
+                value={intervalVal} 
+                onChange={(e) => setIntervalVal(e.target.value)}
+                disabled={trainLoading}
+                className="interval-select"
+              >
+                <option value="5m">5 Minutes</option>
+                <option value="30m">30 Minutes</option>
+                <option value="1h">1 Hour</option>
+                <option value="3h">3 Hours</option>
+                <option value="12h">12 Hours</option>
+                <option value="1d">1 Day (Daily)</option>
+                <option value="3d">3 Days</option>
+                <option value="1wk">1 Week (Weekly)</option>
+              </select>
             </div>
 
             <div className="config-group">
@@ -583,6 +733,48 @@ function App() {
                     <div className="panel-header-desc">
                       <h3>Historical Prices & Out-of-Sample Predictions</h3>
                       <p>Displays the actual Close prices alongside ARIMA forecasts and combined ARIMA-LSTM predictions on the out-of-sample Test dataset (final 20% slice).</p>
+                    </div>
+
+                    <div className="chart-zoom-controls">
+                      <span className="zoom-label">Zoom Range:</span>
+                      <div className="zoom-buttons">
+                        {[
+                          { key: '5min', label: '5m' },
+                          { key: '30min', label: '30m' },
+                          { key: '1h', label: '1h' },
+                          { key: '3h', label: '3h' },
+                          { key: '12h', label: '12h' },
+                          { key: '1d', label: '1d' },
+                          { key: '3d', label: '3d' },
+                          { key: '1w', label: '1w' },
+                          { key: 'all', label: 'All' },
+                          { key: 'custom', label: 'Custom' }
+                        ].map(opt => (
+                          <button
+                            key={opt.key}
+                            onClick={() => setChartZoom(opt.key)}
+                            className={`zoom-btn ${chartZoom === opt.key ? 'active' : ''}`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                      
+                      {chartZoom === 'custom' && (
+                        <div className="custom-zoom-dates">
+                          <input 
+                            type="datetime-local" 
+                            value={customZoomStart} 
+                            onChange={(e) => setCustomZoomStart(e.target.value)} 
+                          />
+                          <span className="date-sep">to</span>
+                          <input 
+                            type="datetime-local" 
+                            value={customZoomEnd} 
+                            onChange={(e) => setCustomZoomEnd(e.target.value)} 
+                          />
+                        </div>
+                      )}
                     </div>
 
                     <div className="chart-wrapper">

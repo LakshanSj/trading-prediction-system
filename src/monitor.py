@@ -24,16 +24,18 @@ class ResidualLSTM(nn.Module):
         out = self.fc(out[:, -1, :])
         return out
 
-def load_models(ticker: str):
+def load_models(ticker: str, interval: str = "1d"):
     """Loads all saved models, scalers, and meta parameters for a ticker."""
-    arima_path = f"models/arima_{ticker.lower()}.pkl"
-    lstm_path = f"models/lstm_{ticker.lower()}.pth"
-    lgb_path = f"models/lgb_{ticker.lower()}.txt"
-    scaler_path = f"models/scaler_{ticker.lower()}.pkl"
-    meta_path = f"models/meta_{ticker.lower()}.pkl"
+    t = ticker.lower()
+    i = interval.lower()
+    arima_path = f"models/arima_{t}_{i}.pkl"
+    lstm_path = f"models/lstm_{t}_{i}.pth"
+    lgb_path = f"models/lgb_{t}_{i}.txt"
+    scaler_path = f"models/scaler_{t}_{i}.pkl"
+    meta_path = f"models/meta_{t}_{i}.pkl"
     
     if not (os.path.exists(arima_path) and os.path.exists(lstm_path) and os.path.exists(scaler_path) and os.path.exists(meta_path)):
-        raise FileNotFoundError(f"Trained models not found for ticker '{ticker}'. Please train models first.")
+        raise FileNotFoundError(f"Trained models not found for ticker '{ticker}' at interval '{interval}'. Please train models first.")
         
     with open(arima_path, 'rb') as f:
         arima_result = pickle.load(f)
@@ -50,7 +52,7 @@ def load_models(ticker: str):
         
     return arima_result, lstm_model, scaler, meta_info
 
-def run_monitoring(ticker: str, alert_threshold=0.50, min_days=5):
+def run_monitoring(ticker: str, interval: str = "1d", alert_threshold=0.50, min_days=5):
     """
     Main monitoring pipeline:
     1. Update previous days' predictions with actual outcomes.
@@ -58,24 +60,50 @@ def run_monitoring(ticker: str, alert_threshold=0.50, min_days=5):
     3. Generate and log prediction for the next trading session.
     """
     ticker = ticker.lower()
+    interval_lower = interval.lower()
     log_dir = "logs"
     os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, f"monitoring_{ticker}.csv")
+    log_path = os.path.join(log_dir, f"monitoring_{ticker}_{interval_lower}.csv")
     
     # Load models
     try:
-        arima_result, lstm_model, scaler, meta_info = load_models(ticker)
+        arima_result, lstm_model, scaler, meta_info = load_models(ticker, interval)
     except Exception as e:
         print(f"Error loading models: {e}")
         return
         
-    # Fetch recent historical data (last 30 days) to run predictions
-    print(f"Fetching recent data for {ticker.upper()}...")
+    # Fetch recent historical data to run predictions
+    print(f"Fetching recent data for {ticker.upper()} ({interval})...")
     today = datetime.now()
-    start_date = (today - timedelta(days=45)).strftime("%Y-%m-%d")
+    
+    # Standardize interval strings for download limits
+    interval_map = {
+        "5min": "5m", "30min": "30m", "1w": "1wk", "1wk": "1wk",
+        "5m": "5m", "30m": "30m", "1h": "1h", "3h": "3h",
+        "12h": "12h", "1d": "1d", "3d": "3d"
+    }
+    std_interval = interval_map.get(interval_lower, "1d")
+    
+    # Configure start_date limits
+    if std_interval in ["5m", "30m"]:
+        start_date = (today - timedelta(days=10)).strftime("%Y-%m-%d")
+        yf_interval = std_interval
+    elif std_interval in ["1h", "3h", "12h"]:
+        start_date = (today - timedelta(days=45)).strftime("%Y-%m-%d")
+        yf_interval = "1h"
+    elif std_interval == "3d":
+        start_date = (today - timedelta(days=180)).strftime("%Y-%m-%d")
+        yf_interval = "1d"
+    elif std_interval in ["1wk"]:
+        start_date = (today - timedelta(days=365)).strftime("%Y-%m-%d")
+        yf_interval = "1wk"
+    else:
+        start_date = (today - timedelta(days=45)).strftime("%Y-%m-%d")
+        yf_interval = "1d"
+        
     end_date = (today + timedelta(days=1)).strftime("%Y-%m-%d")
     
-    df_raw = yf.download(ticker.upper(), start=start_date, end=end_date, progress=False)
+    df_raw = yf.download(ticker.upper(), start=start_date, end=end_date, interval=yf_interval, progress=False)
     if df_raw.empty:
         print("Failed to fetch recent data from yfinance.")
         return
@@ -83,17 +111,43 @@ def run_monitoring(ticker: str, alert_threshold=0.50, min_days=5):
     if isinstance(df_raw.columns, pd.MultiIndex):
         df_raw.columns = df_raw.columns.get_level_values(0)
     df_raw = df_raw.reset_index()
+    if 'Datetime' in df_raw.columns:
+        df_raw = df_raw.rename(columns={'Datetime': 'Date'})
+    elif 'index' in df_raw.columns:
+        df_raw = df_raw.rename(columns={'index': 'Date'})
+        
     df_raw['Date'] = pd.to_datetime(df_raw['Date'])
     df_raw = df_raw.sort_values('Date').reset_index(drop=True)
     
+    # Apply resampling for custom intervals (3h, 12h, 3d)
+    resample_rule = None
+    if std_interval == "3h":
+        resample_rule = "3h"
+    elif std_interval == "12h":
+        resample_rule = "12h"
+    elif std_interval == "3d":
+        resample_rule = "3D"
+        
+    if resample_rule:
+        df_raw = df_raw.set_index('Date')
+        resampled = df_raw.resample(resample_rule).agg({
+            'Open': 'first',
+            'High': 'max',
+            'Low': 'min',
+            'Close': 'last',
+            'Volume': 'sum'
+        }).dropna()
+        df_raw = resampled.reset_index()
+        
     # Save a temporary file to run feature engineering
-    temp_raw_path = f"data/temp_raw_{ticker}.csv"
+    temp_raw_path = f"data/temp_raw_{ticker}_{interval_lower}.csv"
     df_raw.to_csv(temp_raw_path, index=False)
     
     # Engineer features
     try:
-        temp_features_path = engineer_features(temp_raw_path, f"data/temp_features_{ticker}.csv")
+        temp_features_path = engineer_features(temp_raw_path, f"data/temp_features_{ticker}_{interval_lower}.csv")
         df_features = pd.read_csv(temp_features_path)
+        df_features['Date'] = pd.to_datetime(df_features['Date'])
     except Exception as e:
         print(f"Error engineering features: {e}")
         return
@@ -102,8 +156,8 @@ def run_monitoring(ticker: str, alert_threshold=0.50, min_days=5):
         if os.path.exists(temp_raw_path):
             os.remove(temp_raw_path)
             
-    if os.path.exists(f"data/temp_features_{ticker}.csv"):
-        os.remove(f"data/temp_features_{ticker}.csv")
+    if os.path.exists(f"data/temp_features_{ticker}_{interval_lower}.csv"):
+        os.remove(f"data/temp_features_{ticker}_{interval_lower}.csv")
         
     # Load monitoring log or create a new one
     if os.path.exists(log_path):
@@ -154,33 +208,56 @@ def run_monitoring(ticker: str, alert_threshold=0.50, min_days=5):
     last_row = df_features.iloc[-1]
     last_date = pd.to_datetime(last_row['Date'])
     
-    next_date = last_date + timedelta(days=1)
-    if next_date.weekday() == 5: # Saturday
-        next_date += timedelta(days=2)
-    elif next_date.weekday() == 6: # Sunday
-        next_date += timedelta(days=1)
+    # Calculate next timestamp based on interval
+    if std_interval in ["5m", "5min"]:
+        next_date = last_date + timedelta(minutes=5)
+    elif std_interval in ["30m", "30min"]:
+        next_date = last_date + timedelta(minutes=30)
+    elif std_interval == "1h":
+        next_date = last_date + timedelta(hours=1)
+    elif std_interval == "3h":
+        next_date = last_date + timedelta(hours=3)
+    elif std_interval == "12h":
+        next_date = last_date + timedelta(hours=12)
+    elif std_interval == "3d":
+        next_date = last_date + timedelta(days=3)
+    elif std_interval in ["1wk", "1w"]:
+        next_date = last_date + timedelta(weeks=1)
+    else: # Default 1d
+        next_date = last_date + timedelta(days=1)
         
-    next_date_str = next_date.strftime('%Y-%m-%d')
+    # Skip weekends for daily/weekly indicators
+    if std_interval in ["1d", "3d", "1wk", "1w"]:
+        if next_date.weekday() == 5: # Saturday
+            next_date += timedelta(days=2)
+        elif next_date.weekday() == 6: # Sunday
+            next_date += timedelta(days=1)
+            
+    is_intraday = df_features['Date'].dt.time.nunique() > 1
+    next_date_str = next_date.strftime('%Y-%m-%d %H:%M') if is_intraday else next_date.strftime('%Y-%m-%d')
     
-    if len(monitor_df) > 0 and (monitor_df['Date'].dt.date == next_date.date()).any():
-        print(f"Prediction for next trading day ({next_date_str}) already generated.")
+    if len(monitor_df) > 0 and (monitor_df['Date'].dt.date == next_date.date() if not is_intraday else monitor_df['Date'] == next_date).any():
+        print(f"Prediction for next trading interval ({next_date_str}) already generated.")
     else:
-        print(f"Generating prediction for next trading day ({next_date_str})...")
+        print(f"Generating prediction for next trading interval ({next_date_str})...")
         # 1. ARIMA forecast:
         arima_pred = arima_result.forecast(steps=1)[0]
         
         # 2. LSTM residual forecast:
         try:
             updated_arima = arima_result.apply(df_features['Close'].values)
-            recent_residuals = (df_features['Close'].values - updated_arima.fittedvalues)[-meta_info['seq_length']:]
+            # Ensure seq_length matches or fits dataset length
+            seq_len = min(meta_info['seq_length'], len(df_features))
+            recent_residuals = (df_features['Close'].values - updated_arima.fittedvalues)[-seq_len:]
         except Exception as e:
             print(f"Warning: ARIMA apply failed: {e}. Using fallback residuals.")
-            recent_residuals = (df_features['Close'].values - df_features['Close'].shift(1).fillna(method='bfill').values)[-meta_info['seq_length']:]
+            seq_len = min(meta_info['seq_length'], len(df_features))
+            recent_residuals = (df_features['Close'].values - df_features['Close'].shift(1).fillna(method='bfill').values)[-seq_len:]
             
         scaled_residuals = scaler.transform(recent_residuals.reshape(-1, 1)).flatten()
         
         # Format for PyTorch LSTM
-        X_lstm = torch.tensor(scaled_residuals.reshape((1, meta_info['seq_length'], 1)), dtype=torch.float32)
+        X_lstm = torch.tensor(scaled_residuals.reshape((1, seq_len, 1)), dtype=torch.float32)
         
         # Predict LSTM residual
         with torch.no_grad():
@@ -214,9 +291,10 @@ def run_monitoring(ticker: str, alert_threshold=0.50, min_days=5):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Daily model decay monitoring and prediction generation.")
     parser.add_argument("--ticker", type=str, required=True, help="Stock ticker symbol")
+    parser.add_argument("--interval", type=str, default="1d", help="Stock interval/timeframe")
     parser.add_argument("--threshold", type=float, default=0.50, help="Alert accuracy threshold")
     parser.add_argument("--min_days", type=int, default=5, help="Minimum days of history to check decay")
     
     args = parser.parse_args()
     
-    run_monitoring(args.ticker, alert_threshold=args.threshold, min_days=args.min_days)
+    run_monitoring(args.ticker, interval=args.interval, alert_threshold=args.threshold, min_days=args.min_days)
