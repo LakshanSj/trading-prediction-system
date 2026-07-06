@@ -338,17 +338,36 @@ function App() {
                 GO
               </button>
             </form>
-            <div className="ticker-tags">
-              {['AAPL', 'MSFT', 'TSLA', 'GOOG', 'NVDA'].map(sym => (
-                <button 
-                  key={sym} 
-                  onClick={() => { setTickerInput(sym); setTicker(sym); }}
-                  className={`tag-btn ${ticker === sym ? 'active' : ''}`}
-                  disabled={trainLoading}
-                >
-                  {sym}
-                </button>
-              ))}
+            <div className="tag-group-container">
+              <span className="tag-group-label">Stocks</span>
+              <div className="ticker-tags">
+                {['AAPL', 'MSFT', 'TSLA', 'GOOG', 'NVDA'].map(sym => (
+                  <button 
+                    key={sym} 
+                    onClick={() => { setTickerInput(sym); setTicker(sym); }}
+                    className={`tag-btn ${ticker === sym ? 'active' : ''}`}
+                    disabled={trainLoading}
+                  >
+                    {sym}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="tag-group-container" style={{ marginTop: '6px' }}>
+              <span className="tag-group-label">Crypto</span>
+              <div className="ticker-tags">
+                {['BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD', 'DOGE-USD'].map(sym => (
+                  <button 
+                    key={sym} 
+                    onClick={() => { setTickerInput(sym); setTicker(sym); }}
+                    className={`tag-btn ${ticker === sym ? 'active' : ''}`}
+                    disabled={trainLoading}
+                  >
+                    {sym}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
