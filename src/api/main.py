@@ -277,26 +277,83 @@ def get_predictions(ticker: str, interval: str = "1d"):
         is_intraday = df['Date'].dt.time.nunique() > 1
         date_format = '%Y-%m-%d %H:%M' if is_intraday else '%Y-%m-%d'
         
+        # Helper to convert row into detailed payload for indicators/SMC
+        def row_to_dict(row, type_name, arima_val=None, hybrid_val=None):
+            d = {
+                "date": row['Date'].strftime(date_format),
+                "open": float(row['Open']),
+                "high": float(row['High']),
+                "low": float(row['Low']),
+                "close": float(row['Close']),
+                "actual": float(row['Close']),
+                "volume": float(row['Volume']),
+                "type": type_name,
+                
+                # MAs
+                "sma_10": float(row['SMA_10']) if 'SMA_10' in row else None,
+                "sma_20": float(row['SMA_20']) if 'SMA_20' in row else None,
+                "sma_50": float(row['SMA_50']) if 'SMA_50' in row else None,
+                "sma_200": float(row['SMA_200']) if 'SMA_200' in row else None,
+                "ema_9": float(row['EMA_9']) if 'EMA_9' in row else None,
+                "ema_20": float(row['EMA_20']) if 'EMA_20' in row else None,
+                "ema_50": float(row['EMA_50']) if 'EMA_50' in row else None,
+                "ema_200": float(row['EMA_200']) if 'EMA_200' in row else None,
+                
+                # Bollinger Bands
+                "bb_upper": float(row['BB_Upper']) if 'BB_Upper' in row else None,
+                "bb_lower": float(row['BB_Lower']) if 'BB_Lower' in row else None,
+                "bb_mid": float(row['SMA_20']) if 'SMA_20' in row else None,
+                "bb_bandwidth": float(row['BB_Bandwidth']) if 'BB_Bandwidth' in row else None,
+                "bb_percent": float(row['BB_Percent']) if 'BB_Percent' in row else None,
+                
+                # Oscillators
+                "rsi_14": float(row['RSI_14']) if 'RSI_14' in row else None,
+                "stoch_k": float(row['Stoch_K']) if 'Stoch_K' in row else None,
+                "stoch_d": float(row['Stoch_D']) if 'Stoch_D' in row else None,
+                "cci_20": float(row['CCI_20']) if 'CCI_20' in row else None,
+                
+                # SMC Swing levels & zones
+                "last_swing_high": float(row['Last_Swing_High']) if 'Last_Swing_High' in row else None,
+                "last_swing_low": float(row['Last_Swing_Low']) if 'Last_Swing_Low' in row else None,
+                "bullish_ob_high": float(row['Bullish_OB_High']) if 'Bullish_OB_High' in row else None,
+                "bullish_ob_low": float(row['Bullish_OB_Low']) if 'Bullish_OB_Low' in row else None,
+                "bearish_ob_high": float(row['Bearish_OB_High']) if 'Bearish_OB_High' in row else None,
+                "bearish_ob_low": float(row['Bearish_OB_Low']) if 'Bearish_OB_Low' in row else None,
+                
+                # Breakouts, Sweeps & FVGs
+                "bos": int(row['BOS']) if 'BOS' in row else 0,
+                "choch": int(row['CHOCH']) if 'CHOCH' in row else 0,
+                "sweep_high": int(row['Sweep_High']) if 'Sweep_High' in row else 0,
+                "sweep_low": int(row['Sweep_Low']) if 'Sweep_Low' in row else 0,
+                "fvg_bullish": int(row['FVG_Bullish']) if 'FVG_Bullish' in row else 0,
+                "fvg_bullish_size": float(row['FVG_Bullish_Size']) if 'FVG_Bullish_Size' in row else 0.0,
+                "fvg_bearish": int(row['FVG_Bearish']) if 'FVG_Bearish' in row else 0,
+                "fvg_bearish_size": float(row['FVG_Bearish_Size']) if 'FVG_Bearish_Size' in row else 0.0,
+                
+                # Elliott Wave
+                "elliott_wave": int(row['Elliott_Wave']) if 'Elliott_Wave' in row else 0
+            }
+            if arima_val is not None:
+                d["arima"] = float(arima_val)
+            if hybrid_val is not None:
+                d["hybrid"] = float(hybrid_val)
+            return d
+
         # Format history and out-of-sample data for charts (last 100 days train + all test)
         train_df_subset = df.iloc[max(0, split_idx - 100):split_idx].copy()
         
         history = []
         for _, row in train_df_subset.iterrows():
-            history.append({
-                "date": row['Date'].strftime(date_format),
-                "close": float(row['Close']),
-                "type": "train"
-            })
+            history.append(row_to_dict(row, "train"))
             
         predictions = []
         for idx, row in test_df.iterrows():
-            predictions.append({
-                "date": row['Date'].strftime(date_format),
-                "actual": float(row['Close']),
-                "arima": float(row['ARIMA_Pred']),
-                "hybrid": float(row['Hybrid_Pred']),
-                "type": "test"
-            })
+            predictions.append(row_to_dict(
+                row, 
+                "test", 
+                arima_val=row['ARIMA_Pred'], 
+                hybrid_val=row['Hybrid_Pred']
+            ))
             
         # Overall directional accuracy of hybrid model
         test_df['Actual_Dir'] = (test_df['Close'].diff() > 0).astype(int)
@@ -342,11 +399,15 @@ def get_explainability(ticker: str, interval: str = "1d"):
             
         df = pd.read_csv(features_path)
         
-        feature_cols = [
+        # Load meta info dynamically to get the trained list of feature columns
+        with open(meta_path, 'rb') as f:
+            meta_info = pickle.load(f)
+            
+        feature_cols = meta_info.get('feature_cols', [
             'Return_Lag_1', 'Return_Lag_2', 'Return_Lag_3', 'Return_Lag_5', 'Return_Lag_10',
             'Vol_5', 'Vol_10', 'Vol_20', 'SMA_10', 'SMA_20', 'EMA_12', 'EMA_26', 'RSI_14',
             'MACD', 'MACD_Signal', 'MACD_Hist'
-        ]
+        ])
         
         # Calculate feature contributions on latest row
         latest_features = df[feature_cols].iloc[-1:]

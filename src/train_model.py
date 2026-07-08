@@ -131,11 +131,23 @@ def train_pipeline(feature_path: str, ticker: str, interval: str = "1d", arima_o
     # Drop last row since it won't have a shift target
     df_lgb = df.dropna().reset_index(drop=True)
     
-    # Align features and target
     feature_cols = [
         'Return_Lag_1', 'Return_Lag_2', 'Return_Lag_3', 'Return_Lag_5', 'Return_Lag_10',
-        'Vol_5', 'Vol_10', 'Vol_20', 'SMA_10', 'SMA_20', 'EMA_12', 'EMA_26', 'RSI_14',
-        'MACD', 'MACD_Signal', 'MACD_Hist'
+        'Vol_5', 'Vol_10', 'Vol_20',
+        'SMA_10', 'SMA_20', 'SMA_50', 'SMA_200',
+        'EMA_9', 'EMA_12', 'EMA_20', 'EMA_26', 'EMA_50', 'EMA_200',
+        'Golden_Cross', 'Death_Cross', 'Dist_SMA_50', 'Dist_SMA_200',
+        'MA_Stack_Spread', 'MA_Stack_Order',
+        'Support_Bounce_50', 'Support_Bounce_200',
+        'Resistance_Rejection_50', 'Resistance_Rejection_200',
+        'RSI_14', 'MACD', 'MACD_Signal', 'MACD_Hist',
+        'Stoch_K', 'Stoch_D', 'CCI_20',
+        'BB_Upper', 'BB_Lower', 'BB_Bandwidth', 'BB_Percent',
+        'BOS', 'CHOCH',
+        'Bullish_OB_High', 'Bullish_OB_Low', 'Bearish_OB_High', 'Bearish_OB_Low',
+        'Sweep_High', 'Sweep_Low',
+        'FVG_Bullish', 'FVG_Bullish_Size', 'FVG_Bearish', 'FVG_Bearish_Size',
+        'Elliott_Wave'
     ]
     
     train_df_lgb = df_lgb.iloc[:split_idx - 1]

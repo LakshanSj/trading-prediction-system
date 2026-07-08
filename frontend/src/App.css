@@ -1040,3 +1040,202 @@ body {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* Custom prediction layout (2 columns) */
+.predictions-layout {
+  display: flex;
+  gap: 20px;
+  width: 100%;
+}
+
+@media (max-width: 1200px) {
+  .predictions-layout {
+    flex-direction: column;
+  }
+}
+
+.charts-column {
+  flex: 2.2;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+.analytics-column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 320px;
+}
+
+/* Control buttons for overlays */
+.overlay-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.overlay-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.overlay-btn:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--text-main);
+}
+
+.overlay-btn.active {
+  background-color: rgba(0, 242, 254, 0.15);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  text-shadow: 0 0 5px rgba(0, 242, 254, 0.3);
+}
+
+/* Cards & lists for SMC & Elliott */
+.analytics-card {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.analytics-card h4 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 8px;
+}
+
+.analytics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.analytics-item {
+  background-color: var(--bg-tertiary);
+  border: 1px solid rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.analytics-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+.analytics-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.analytics-value.bullish {
+  color: var(--accent-green);
+}
+
+.analytics-value.bearish {
+  color: var(--accent-red);
+}
+
+.analytics-value.neutral {
+  color: var(--accent-orange);
+}
+
+/* Checklists */
+.checklist-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.checklist-item:last-child {
+  border-bottom: none;
+}
+
+.checklist-label {
+  color: var(--text-muted);
+}
+
+.checklist-status {
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.checklist-status.passed {
+  color: var(--accent-green);
+}
+
+.checklist-status.failed {
+  color: var(--accent-red);
+}
+
+.checklist-status.pending {
+  color: var(--accent-orange);
+}
+
+/* Oscillator sub-tabs */
+.oscillator-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.oscillator-tab-btn {
+  background: none;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 16px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  border-bottom: 2px solid transparent;
+}
+
+.oscillator-tab-btn:hover {
+  color: var(--text-main);
+}
+
+.oscillator-tab-btn.active {
+  color: var(--accent-cyan);
+  border-bottom-color: var(--accent-cyan);
+}
+
