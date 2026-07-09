@@ -21,7 +21,9 @@ import {
   Minimize2,
   Eye,
   EyeOff,
-  Sliders
+  Sliders,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { 
   LineChart, 
