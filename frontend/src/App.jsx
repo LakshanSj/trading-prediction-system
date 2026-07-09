@@ -1011,19 +1011,6 @@ function App() {
                                 <span className="tv-indicator-value">{latestItem?.smma_5 ? latestItem.smma_5.toFixed(2) : 'n/a'}</span>
                               </div>
                             </div>
-
-                            {/* BUY/SELL quick labels */}
-                            <div className="tv-quick-trade-box">
-                              <div className="tv-trade-pill sell-pill">
-                                <span className="tv-pill-label">SELL</span>
-                                <span className="tv-pill-price">{(latestPrice - 0.01).toFixed(2)}</span>
-                              </div>
-                              <div className="tv-pill-spread">0.01</div>
-                              <div className="tv-trade-pill buy-pill">
-                                <span className="tv-pill-price">{latestPrice.toFixed(2)}</span>
-                                <span className="tv-pill-label">BUY</span>
-                              </div>
-                            </div>
                           </div>
 
                           <ResponsiveContainer width="100%" height="100%">
