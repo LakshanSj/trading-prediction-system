@@ -14,8 +14,10 @@ from pydantic import BaseModel
 # Resolve project root (two levels up from src/api/)
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 
-# Add src folder to Python path
+# Add src/ folder to Python path (for data_fetcher, feature_engineer, etc.)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Add src/api/ folder to Python path (for admin.py, admin_logger.py)
+sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
 # Import from core components
 from data_fetcher import fetch_data
