@@ -1,0 +1,2 @@
+{"id": "20260709105532-00001", "timestamp": "2026-07-09T05:25:32.330884+00:00", "timestamp_local": "2026-07-09 10:55:32", "event_type": "SYSTEM_START", "user": "system", "ip_address": "unknown", "success": true, "details": {"message": "Backend API server started"}}
+{"id": "20260709105549-00001", "timestamp": "2026-07-09T05:25:49.136025+00:00", "timestamp_local": "2026-07-09 10:55:49", "event_type": "SYSTEM_START", "user": "system", "ip_address": "unknown", "success": true, "details": {"message": "Backend API server started"}}
