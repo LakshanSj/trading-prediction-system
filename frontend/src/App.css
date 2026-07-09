@@ -1240,6 +1240,21 @@ body {
   color: var(--accent-orange);
 }
 
+.oscillator-section {
+  margin-top: 20px;
+  padding: 16px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+.oscillator-chart-wrapper {
+  height: 180px;
+  min-height: 0;
+}
+
 /* Oscillator sub-tabs */
 .oscillator-tabs {
   display: flex;
@@ -1897,35 +1912,100 @@ body {
   position: fixed !important;
   inset: 0 !important;
   z-index: 99998 !important;
-  background: radial-gradient(circle at 50% 0%, #15223c 0%, var(--bg-primary) 70%) !important;
-  padding: 30px !important;
+  background: #060913 !important; /* Deeper programmer black */
+  padding: 24px !important;
   display: flex !important;
   flex-direction: column !important;
-  gap: 16px !important;
+  gap: 12px !important;
   width: 100vw !important;
   height: 100vh !important;
   box-sizing: border-box !important;
+  overflow-y: auto !important; /* Fallback if elements exceed screen height */
 }
 
+/* Programmer Mode Font & Layout Rules */
+.charts-column.fullscreen * {
+  font-family: 'Fira Code', 'Courier New', Consolas, Monaco, monospace !important;
+  font-size: 10.5px !important;
+  letter-spacing: -0.2px !important;
+}
+
+.charts-column.fullscreen h3 {
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  color: var(--accent-cyan) !important;
+  text-transform: uppercase !important;
+}
+
+.charts-column.fullscreen .zoom-label {
+  font-size: 9.5px !important;
+  text-transform: uppercase !important;
+  color: var(--text-muted) !important;
+}
+
+/* Custom Zoom Button Programmer Styles */
+.charts-column.fullscreen .zoom-btn,
+.charts-column.fullscreen .overlay-btn,
+.charts-column.fullscreen .oscillator-tab-btn {
+  font-size: 9.5px !important;
+  padding: 4px 10px !important;
+  border-radius: 4px !important;
+  text-transform: uppercase !important;
+}
+
+/* ── Resizable Price Chart Wrapper ── */
 .charts-column.fullscreen .chart-wrapper.fullscreen {
+  flex: none !important; /* Disable flex auto-stretching to allow manual resizing */
+  height: 50vh !important; /* Default starting height */
+  min-height: 180px !important;
+  max-height: 80vh !important;
+  resize: vertical !important;
+  overflow: hidden !important; /* Needed for native resize handle to render */
+  background-color: #0b0f19 !important;
+  border: 1px solid rgba(0, 242, 254, 0.15) !important;
+  border-radius: 8px !important;
+  padding: 16px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7) !important;
+}
+
+/* ── Resizable Oscillator/RSI Wrapper ── */
+.charts-column.fullscreen .oscillator-section.fullscreen {
+  flex: none !important;
+  height: 25vh !important; /* Default starting height */
+  min-height: 120px !important;
+  max-height: 50vh !important;
+  resize: vertical !important;
+  overflow: hidden !important;
+  margin-top: 0 !important; /* Tighten layout gap */
+  padding: 12px 16px !important;
+  background-color: #0b0f19 !important;
+  border: 1px solid rgba(0, 242, 254, 0.15) !important;
+  border-radius: 8px !important;
+}
+
+.charts-column.fullscreen .oscillator-chart-wrapper {
   flex: 1 !important;
   min-height: 0 !important;
-  height: auto !important;
-  background-color: var(--bg-secondary) !important;
-  border: 1px solid var(--border-color) !important;
-  border-radius: 12px !important;
-  padding: 20px !important;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5) !important;
+  height: calc(100% - 30px) !important; /* Reserve space for sub-tabs */
+}
+
+/* Native Drag Handle Customize */
+.charts-column.fullscreen .chart-wrapper.fullscreen::-webkit-resizer,
+.charts-column.fullscreen .oscillator-section.fullscreen::-webkit-resizer {
+  background-image: linear-gradient(135deg, transparent 50%, var(--accent-cyan) 50%);
+  background-size: 10px 10px;
+  background-repeat: no-repeat;
+  width: 12px;
+  height: 12px;
 }
 
 .charts-column.fullscreen .chart-zoom-controls,
 .charts-column.fullscreen .overlay-controls {
   flex-shrink: 0 !important;
-  background-color: rgba(17, 23, 38, 0.85) !important;
-  backdrop-filter: blur(10px) !important;
-  border: 1px solid var(--border-color) !important;
-  border-radius: 8px !important;
-  padding: 12px 18px !important;
+  background-color: #0a0e17 !important;
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+  border-radius: 6px !important;
+  padding: 8px 14px !important;
 }
 
 /* Highlight style for the fullscreen button */

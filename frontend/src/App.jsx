@@ -971,7 +971,7 @@ function App() {
                         </div>
 
                         {/* Oscillator Panel below price chart */}
-                        <div className="oscillator-section" style={{ marginTop: '20px', padding: '16px', backgroundColor: 'var(--bg-secondary)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                        <div className={`oscillator-section ${isFullScreen ? 'fullscreen' : ''}`}>
                           <div className="oscillator-tabs">
                             {['rsi', 'stochastic', 'cci'].map(tab => (
                               <button 
@@ -984,8 +984,8 @@ function App() {
                             ))}
                           </div>
 
-                          <div className="oscillator-chart-wrapper" style={{ height: '180px' }}>
-                            <ResponsiveContainer width="100%" height={100}>
+                          <div className="oscillator-chart-wrapper">
+                            <ResponsiveContainer width="100%" height="100%">
                               {oscillatorTab === 'rsi' ? (
                                 <LineChart data={getPredictionChartData()}>
                                   <CartesianGrid strokeDasharray="3 3" stroke="#2e333d" />
