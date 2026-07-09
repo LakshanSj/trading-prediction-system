@@ -980,7 +980,7 @@ function App() {
                         </div>
 
                         {/* Price Chart */}
-                        <div className={`chart-wrapper ${isFullScreen ? 'fullscreen' : ''}`} style={isFullScreen ? { height: `${priceChartHeight}px` } : {}}>
+                        <div className={`chart-wrapper ${isFullScreen ? 'fullscreen' : ''}`} style={isFullScreen ? { height: `${priceChartHeight}px` } : { height: '400px' }}>
                           {/* TradingView-Style Left Header Overlays */}
                           <div className="tv-chart-legend">
                             <div className="tv-legend-ticker-row">
@@ -1081,8 +1081,7 @@ function App() {
                                   label={{ 
                                     value: latestPrice.toFixed(2), 
                                     position: 'right', 
-                                    fill: '#fff', 
-                                    backgroundColor: latestPriceColor, 
+                                    fill: latestPriceColor, 
                                     fontSize: 10,
                                     fontWeight: 'bold'
                                   }} 
@@ -1107,7 +1106,7 @@ function App() {
                         )}
 
                         {/* Oscillator Panel below price chart */}
-                        <div className={`oscillator-section ${isFullScreen ? 'fullscreen' : ''}`} style={isFullScreen ? { height: `${oscillatorChartHeight}px` } : {}}>
+                        <div className={`oscillator-section ${isFullScreen ? 'fullscreen' : ''}`} style={isFullScreen ? { height: `${oscillatorChartHeight}px` } : { height: '240px' }}>
                           <div className="oscillator-tabs">
                             {['rsi', 'stochastic', 'cci'].map(tab => (
                               <button 
@@ -1150,7 +1149,7 @@ function App() {
                                       y={latestItem.rsi_14} 
                                       stroke="#a78bfa" 
                                       strokeDasharray="2 2"
-                                      label={{ value: latestItem.rsi_14.toFixed(2), position: 'right', fill: '#fff', backgroundColor: '#a78bfa', fontSize: 10 }}
+                                      label={{ value: latestItem.rsi_14.toFixed(2), position: 'right', fill: '#a78bfa', fontSize: 10, fontWeight: 'bold' }}
                                     />
                                   )}
                                   {latestItem?.rsi_ma && (
@@ -1158,7 +1157,7 @@ function App() {
                                       y={latestItem.rsi_ma} 
                                       stroke="#ffd600" 
                                       strokeDasharray="2 2"
-                                      label={{ value: latestItem.rsi_ma.toFixed(2), position: 'right', fill: '#000', backgroundColor: '#ffd600', fontSize: 10 }}
+                                      label={{ value: latestItem.rsi_ma.toFixed(2), position: 'right', fill: '#ffd600', fontSize: 10, fontWeight: 'bold' }}
                                     />
                                   )}
 
