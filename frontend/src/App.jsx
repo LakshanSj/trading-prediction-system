@@ -116,7 +116,8 @@ function App() {
   const [backendStatus, setBackendStatus] = useState('checking');
   const [showAdmin, setShowAdmin] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
-  const [showSidebar, setShowSidebar] = useState(false);
+  const [showLeftSidebar, setShowLeftSidebar] = useState(true);
+  const [showRightSidebar, setShowRightSidebar] = useState(false);
   
   // Data states
   const [tickerStatus, setTickerStatus] = useState(null); // {status, meta}
@@ -983,11 +984,11 @@ function App() {
                             <Settings size={12} /> SMC Order Blocks & Sweeps
                           </button>
                           <button 
-                            onClick={() => setShowSidebar(!showSidebar)} 
-                            className={`overlay-btn ${showSidebar ? 'active' : ''}`}
+                            onClick={() => setShowRightSidebar(!showRightSidebar)} 
+                            className={`overlay-btn ${showRightSidebar ? 'active' : ''}`}
                             title="Toggle Analytics Sidebar"
                           >
-                            <Sliders size={12} /> {showSidebar ? 'Hide Analytics' : 'Show Analytics'}
+                            <Sliders size={12} /> {showRightSidebar ? 'Hide Analytics' : 'Show Analytics'}
                           </button>
                           <button 
                             onClick={() => setIsFullScreen(!isFullScreen)} 
@@ -1208,7 +1209,7 @@ function App() {
                       </div>
 
                       {/* Right Column: Analytics Sidebar */}
-                      {showSidebar && (
+                      {showRightSidebar && (
                         <div className="analytics-column">
                           {/* SMC Panel */}
                           <div className="analytics-card">
