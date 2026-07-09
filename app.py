@@ -97,12 +97,11 @@ ticker_input = st.sidebar.text_input("Stock Ticker", value="AAPL").strip().upper
 
 # Interval selection
 interval_input = st.sidebar.selectbox("Data Interval / Timeframe", 
-    options=["5m", "30m", "1h", "3h", "12h", "1d", "3d", "1wk"], 
-    index=5,
+    options=["1h", "4h", "1d", "1wk"], 
+    index=2,
     format_func=lambda x: {
-        "5m": "5 Minutes", "30m": "30 Minutes", "1h": "1 Hour", 
-        "3h": "3 Hours", "12h": "12 Hours", "1d": "1 Day (Daily)", 
-        "3d": "3 Days", "1wk": "1 Week (Weekly)"
+        "1h": "1 Hour", "4h": "4 Hours", 
+        "1d": "1 Day (Daily)", "1wk": "1 Week (Weekly)"
     }[x]
 )
 
