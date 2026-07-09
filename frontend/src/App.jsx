@@ -931,23 +931,6 @@ function App() {
                                 dot={false}
                                 strokeWidth={2}
                               />
-                              <Line 
-                                type="monotone" 
-                                dataKey="arima" 
-                                name="ARIMA Forecast Only" 
-                                stroke="#ff9100" 
-                                dot={false} 
-                                strokeDasharray="5 5"
-                                strokeWidth={1.5}
-                              />
-                              <Line 
-                                type="monotone" 
-                                dataKey="hybrid" 
-                                name="ARIMA-LSTM Hybrid Predict" 
-                                stroke="#2979ff" 
-                                dot={false}
-                                strokeWidth={2}
-                              />
 
                               {/* MA overlays */}
                               {showMA && (
