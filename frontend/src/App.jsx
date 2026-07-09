@@ -20,7 +20,8 @@ import {
   Maximize2,
   Minimize2,
   Eye,
-  EyeOff
+  EyeOff,
+  Sliders
 } from 'lucide-react';
 import { 
   LineChart, 
@@ -113,6 +114,7 @@ function App() {
   const [backendStatus, setBackendStatus] = useState('checking');
   const [showAdmin, setShowAdmin] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false);
   
   // Data states
   const [tickerStatus, setTickerStatus] = useState(null); // {status, meta}
@@ -967,6 +969,13 @@ function App() {
                             <Settings size={12} /> SMC Order Blocks & Sweeps
                           </button>
                           <button 
+                            onClick={() => setShowSidebar(!showSidebar)} 
+                            className={`overlay-btn ${showSidebar ? 'active' : ''}`}
+                            title="Toggle Analytics Sidebar"
+                          >
+                            <Sliders size={12} /> {showSidebar ? 'Hide Analytics' : 'Show Analytics'}
+                          </button>
+                          <button 
                             onClick={() => setIsFullScreen(!isFullScreen)} 
                             className={`overlay-btn highlight-accent ${isFullScreen ? 'active' : ''}`}
                             title="Toggle Full Screen Chart"
@@ -1087,9 +1096,6 @@ function App() {
                                   }} 
                                 />
                               )}
-                              
-                              {/* Horizontal scroll slider */}
-                              <Brush dataKey="date" height={15} stroke="rgba(0, 242, 254, 0.4)" fill="#0d111a" tickFormatter={() => ''} />
                             </ComposedChart>
                           </ResponsiveContainer>
                         </div>
@@ -1142,8 +1148,7 @@ function App() {
                                   {/* RSI (purple) and RSI-MA (yellow) lines */}
                                   <Line type="monotone" dataKey="rsi_14" name="RSI" stroke="#a78bfa" dot={false} strokeWidth={1.5} />
                                   <Line type="monotone" dataKey="rsi_ma" name="RSI-MA" stroke="#ffd600" dot={false} strokeWidth={1.5} />
-                                  
-                                  {/* Dynamic axis current labels */}
+                                                          {/* Dynamic axis current labels */}
                                   {latestItem?.rsi_14 && (
                                     <ReferenceLine 
                                       y={latestItem.rsi_14} 
@@ -1160,8 +1165,6 @@ function App() {
                                       label={{ value: latestItem.rsi_ma.toFixed(2), position: 'right', fill: '#ffd600', fontSize: 10, fontWeight: 'bold' }}
                                     />
                                   )}
-
-                                  <Brush dataKey="date" height={15} stroke="rgba(0, 242, 254, 0.4)" fill="#0d111a" tickFormatter={() => ''} />
                                 </LineChart>
                               ) : oscillatorTab === 'stochastic' ? (
                                 <LineChart data={getPredictionChartData()}>
@@ -1173,7 +1176,6 @@ function App() {
                                   <ReferenceLine y={20} stroke="#00e676" strokeDasharray="3 3" />
                                   <Line type="monotone" dataKey="stoch_k" name="%K" stroke="#00f2fe" dot={false} strokeWidth={1.5} />
                                   <Line type="monotone" dataKey="stoch_d" name="%D" stroke="#ff9100" dot={false} strokeWidth={1.5} />
-                                  <Brush dataKey="date" height={15} stroke="rgba(0, 242, 254, 0.4)" fill="#0d111a" tickFormatter={() => ''} />
                                 </LineChart>
                               ) : (
                                 <LineChart data={getPredictionChartData()}>
@@ -1184,7 +1186,6 @@ function App() {
                                   <ReferenceLine y={100} stroke="#ff1744" strokeDasharray="3 3" />
                                   <ReferenceLine y={-100} stroke="#00e676" strokeDasharray="3 3" />
                                   <Line type="monotone" dataKey="cci_20" name="CCI" stroke="#2979ff" dot={false} strokeWidth={1.5} />
-                                  <Brush dataKey="date" height={15} stroke="rgba(0, 242, 254, 0.4)" fill="#0d111a" tickFormatter={() => ''} />
                                 </LineChart>
                               )}
                             </ResponsiveContainer>
@@ -1193,155 +1194,167 @@ function App() {
                       </div>
 
                       {/* Right Column: Analytics Sidebar */}
-                      <div className="analytics-column">
-                        {/* SMC Panel */}
-                        <div className="analytics-card">
-                          <h4>🛡️ SMC Institutional Footprint</h4>
-                          <div className="analytics-grid">
-                            <div className="analytics-item">
-                              <span className="analytics-label">Swing High</span>
-                              <span className="analytics-value">
+                      {showSidebar && (
+                        <div className="analytics-column">
+                          {/* SMC Panel */}
+                          <div className="analytics-card">
+                            <h4>🛡️ SMC Institutional Footprint</h4>
+                            <div className="analytics-grid">
+                              <div className="analytics-item">
+                                <span className="analytics-label">Swing High</span>
+                                <span className="analytics-value">
+                                  {(() => {
+                                    const list = getPredictionChartData();
+                                    const val = list.length > 0 ? list[list.length - 1].last_swing_high : null;
+                                    return val ? `$${val.toFixed(2)}` : 'N/A';
+                                  })()}
+                                </span>
+                              </div>
+                              <div className="analytics-item">
+                                <span className="analytics-label">Swing Low</span>
+                                <span className="analytics-value">
+                                  {(() => {
+                                    const list = getPredictionChartData();
+                                    const val = list.length > 0 ? list[list.length - 1].last_swing_low : null;
+                                    return val ? `$${val.toFixed(2)}` : 'N/A';
+                                  })()}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="checklist-item">
+                              <span className="checklist-label">Break of Structure (BOS)</span>
+                              <span className={
+                                (() => {
+                                  const list = getPredictionChartData();
+                                  const val = list.length > 0 ? list[list.length - 1].bos : 0;
+                                  return val === 1 ? "checklist-status passed" : val === -1 ? "checklist-status failed" : "checklist-status pending";
+                                })()
+                              }>
                                 {(() => {
                                   const list = getPredictionChartData();
-                                  const val = list.length > 0 ? list[list.length - 1].last_swing_high : null;
-                                  return val ? `$${val.toFixed(2)}` : 'N/A';
+                                  const val = list.length > 0 ? list[list.length - 1].bos : 0;
+                                  return val === 1 ? "Bullish BOS" : val === -1 ? "Bearish BOS" : "No Breakout";
                                 })()}
                               </span>
                             </div>
-                            <div className="analytics-item">
-                              <span className="analytics-label">Swing Low</span>
-                              <span className="analytics-value">
+
+                            <div className="checklist-item">
+                              <span className="checklist-label">Change of Character (CHOCH)</span>
+                              <span className={
+                                (() => {
+                                  const list = getPredictionChartData();
+                                  const val = list.length > 0 ? list[list.length - 1].choch : 0;
+                                  return val === 1 ? "checklist-status passed" : val === -1 ? "checklist-status failed" : "checklist-status pending";
+                                })()
+                              }>
                                 {(() => {
                                   const list = getPredictionChartData();
-                                  const val = list.length > 0 ? list[list.length - 1].last_swing_low : null;
-                                  return val ? `$${val.toFixed(2)}` : 'N/A';
+                                  const val = list.length > 0 ? list[list.length - 1].choch : 0;
+                                  return val === 1 ? "Bullish CHOCH" : val === -1 ? "Bearish CHOCH" : "No Trend Shift";
+                                })()}
+                              </span>
+                            </div>
+
+                            <div className="checklist-item">
+                              <span className="checklist-label">Liquidity Sweeps</span>
+                              <span className={
+                                (() => {
+                                  const list = getPredictionChartData();
+                                  const val = list.length > 0 ? list[list.length - 1].liquidity_sweep : 0;
+                                  return val !== 0 ? "checklist-status passed" : "checklist-status pending";
+                                })()
+                              }>
+                                {(() => {
+                                  const list = getPredictionChartData();
+                                  const val = list.length > 0 ? list[list.length - 1].liquidity_sweep : 0;
+                                  return val === 1 ? "Bull Sweep" : val === -1 ? "Bear Sweep" : "Stable Pools";
+                                })()}
+                              </span>
+                            </div>
+
+                            <div className="checklist-item">
+                              <span className="checklist-label">Active Fair Value Gap</span>
+                              <span className={
+                                (() => {
+                                  const list = getPredictionChartData();
+                                  const val = list.length > 0 ? list[list.length - 1].fvg : 0;
+                                  return val !== 0 ? "checklist-status passed" : "checklist-status pending";
+                                })()
+                              }>
+                                {(() => {
+                                  const list = getPredictionChartData();
+                                  const val = list.length > 0 ? list[list.length - 1].fvg : 0;
+                                  return val === 1 ? "Bullish FVG" : val === -1 ? "Bearish FVG" : "No Imbalance";
                                 })()}
                               </span>
                             </div>
                           </div>
 
-                          <div className="checklist-item">
-                            <span className="checklist-label">Break of Structure (BOS)</span>
-                            <span className={
-                              (() => {
-                                const list = getPredictionChartData();
-                                const val = list.length > 0 ? list[list.length - 1].bos : 0;
-                                return val === 1 ? "checklist-status passed" : val === -1 ? "checklist-status failed" : "checklist-status pending";
-                              })()
-                            }>
-                              {(() => {
-                                const list = getPredictionChartData();
-                                const val = list.length > 0 ? list[list.length - 1].bos : 0;
-                                return val === 1 ? "Bullish BOS" : val === -1 ? "Bearish BOS" : "No Breakout";
-                              })()}
-                            </span>
-                          </div>
+                          {/* Elliott Wave Panel */}
+                          <div className="analytics-card">
+                            <h4>🌊 Elliott Wave Psychology</h4>
+                            <div className="analytics-grid">
+                              <div className="analytics-item" style={{ gridColumn: 'span 2' }}>
+                                <span className="analytics-label">Current Wave Phase</span>
+                                <span className="analytics-value" style={{ color: '#00f2fe' }}>
+                                  {(() => {
+                                    const list = getPredictionChartData();
+                                    if (list.length === 0) return "No Data";
+                                    const wave = list[list.length - 1].elliott_wave;
+                                    switch(wave) {
+                                      case 1: return "Wave 1 - Motive Phase";
+                                      case 2: return "Wave 2 - Correction Phase";
+                                      case 3: return "Wave 3 - Strong Trend Phase";
+                                      case 4: return "Wave 4 - Re-accumulation Phase";
+                                      case 5: return "Wave 5 - Exhaustion Motive";
+                                      case -1: return "Corrective Wave A";
+                                      case -2: return "Corrective Wave B";
+                                      case -3: return "Corrective Wave C";
+                                      default: return "Awaiting Wave Formation";
+                                    }
+                                  })()}
+                                </span>
+                              </div>
+                            </div>
 
-                          <div className="checklist-item">
-                            <span className="checklist-label">Change of Character (CHOCH)</span>
-                            <span className={
-                              (() => {
-                                const list = getPredictionChartData();
-                                const val = list.length > 0 ? list[list.length - 1].choch : 0;
-                                return val === 1 ? "checklist-status passed" : val === -1 ? "checklist-status failed" : "checklist-status pending";
-                              })()
-                            }>
-                              {(() => {
-                                const list = getPredictionChartData();
-                                const val = list.length > 0 ? list[list.length - 1].choch : 0;
-                                return val === 1 ? "Bullish CHOCH" : val === -1 ? "Bearish CHOCH" : "No Trend Shift";
-                              })()}
-                            </span>
-                          </div>
+                            <div className="checklist-item">
+                              <span className="checklist-label">Rule 1: Wave 2 Retracement limit</span>
+                              <span className="checklist-status passed">PASSED</span>
+                            </div>
+                            <div className="checklist-item">
+                              <span className="checklist-label">Rule 2: Wave 3 is never the shortest</span>
+                              <span className="checklist-status passed">PASSED</span>
+                            </div>
+                            <div className="checklist-item">
+                              <span className="checklist-label">Rule 3: Wave 4 overlaps Wave 1 limit</span>
+                              <span className="checklist-status passed">PASSED</span>
+                            </div>
 
-                          <div className="checklist-item">
-                            <span className="checklist-label">Liquidity Sweeps</span>
-                            <span className="checklist-status pending" style={{ color: 'var(--accent-orange)' }}>
-                              {(() => {
-                                const list = getPredictionChartData();
-                                if (list.length === 0) return "None";
-                                const row = list[list.length - 1];
-                                if (row.sweep_high === 1) return "Swept High (Bearish)";
-                                if (row.sweep_low === 1) return "Swept Low (Bullish)";
-                                return "Stable Pools";
-                              })()}
-                            </span>
-                          </div>
-
-                          <div className="checklist-item">
-                            <span className="checklist-label">Active Fair Value Gap</span>
-                            <span className="checklist-status" style={{ color: 'var(--text-muted)' }}>
-                              {(() => {
-                                const list = getPredictionChartData();
-                                if (list.length === 0) return "None";
-                                const row = list[list.length - 1];
-                                if (row.fvg_bullish_size > 0) return `Bullish ($${row.fvg_bullish_size.toFixed(2)})`;
-                                if (row.fvg_bearish_size > 0) return `Bearish ($${row.fvg_bearish_size.toFixed(2)})`;
-                                return "No Imbalance";
-                              })()}
-                            </span>
+                            <div style={{ marginTop: '10px', fontSize: '11px', lineHeight: '1.4', padding: '10px', borderRadius: '6px', backgroundColor: 'var(--bg-tertiary)', borderLeft: '3px solid var(--accent-cyan)' }}>
+                              <strong>Wave Analysis:</strong>
+                              <p style={{ color: 'var(--text-muted)', marginTop: '4px' }}>
+                                {(() => {
+                                  const list = getPredictionChartData();
+                                  if (list.length === 0) return "No Data";
+                                  const wave = list[list.length - 1].elliott_wave;
+                                  switch(wave) {
+                                    case 1: return "Impulsive rise starting. Monitor for Wave 2 pullback support.";
+                                    case 2: return "Corrective pullback in progress. Look for support confirmation above Wave 1 start.";
+                                    case 3: return "Strongest impulse phase active. High institutional volume is driving price trend.";
+                                    case 4: return "Temporary profit-taking/re-accumulation. Validate overlap limits.";
+                                    case 5: return "Exhaustion wave. Market sentiment is highly bullish but overextended. Prepare for A-B-C correction.";
+                                    case -1: return "First leg of corrective cycle (Wave A) is pushing prices down. Expect intermediate counter-trend bounce.";
+                                    case -2: return "Wave B corrective bounce is forming. Avoid long-term holds; likely a dead-cat bounce.";
+                                    case -3: return "Final Wave C capitulation is flushing out remaining retail liquidity. Prepare for new cycle.";
+                                    default: return "Market structure is in search of a clean 5-wave motive. Watch key pivots.";
+                                  }
+                                })()}
+                              </p>
+                            </div>
                           </div>
                         </div>
-
-                        {/* Elliott Wave Panel */}
-                        <div className="analytics-card">
-                          <h4>🌊 Elliott Wave Psychology</h4>
-                          <div className="analytics-item" style={{ width: '100%' }}>
-                            <span className="analytics-label">Current Wave Phase</span>
-                            <span className="analytics-value neutral" style={{ color: 'var(--accent-cyan)' }}>
-                              {(() => {
-                                const list = getPredictionChartData();
-                                if (list.length === 0) return "No Data";
-                                const wave = list[list.length - 1].elliott_wave;
-                                if (wave === 1) return "Wave 1 (Impulse Start)";
-                                if (wave === 2) return "Wave 2 (Retracement)";
-                                if (wave === 3) return "Wave 3 (Impulse Trend)";
-                                if (wave === 4) return "Wave 4 (Consolidation)";
-                                if (wave === 5) return "Wave 5 (Trend Exhaustion)";
-                                if (wave === -1) return "Wave A (Correction Down)";
-                                if (wave === -2) return "Wave B (Corrective Bounce)";
-                                if (wave === -3) return "Wave C (Final Capitulation)";
-                                return "Awaiting Wave Formation";
-                              })()}
-                            </span>
-                          </div>
-
-                          <div className="checklist-item">
-                            <span className="checklist-label">Rule 1: Wave 2 Retracement limit</span>
-                            <span className="checklist-status passed">PASSED</span>
-                          </div>
-                          <div className="checklist-item">
-                            <span className="checklist-label">Rule 2: Wave 3 is never the shortest</span>
-                            <span className="checklist-status passed">PASSED</span>
-                          </div>
-                          <div className="checklist-item">
-                            <span className="checklist-label">Rule 3: Wave 4 overlaps Wave 1 limit</span>
-                            <span className="checklist-status passed">PASSED</span>
-                          </div>
-
-                          <div style={{ marginTop: '10px', fontSize: '11px', lineHeight: '1.4', padding: '10px', borderRadius: '6px', backgroundColor: 'var(--bg-tertiary)', borderLeft: '3px solid var(--accent-cyan)' }}>
-                            <strong>Wave Analysis:</strong>
-                            <p style={{ color: 'var(--text-muted)', marginTop: '4px' }}>
-                              {(() => {
-                                const list = getPredictionChartData();
-                                if (list.length === 0) return "No Data";
-                                const wave = list[list.length - 1].elliott_wave;
-                                switch(wave) {
-                                  case 1: return "Impulsive rise starting. Monitor for Wave 2 pullback support.";
-                                  case 2: return "Corrective pullback in progress. Look for support confirmation above Wave 1 start.";
-                                  case 3: return "Strongest impulse phase active. High institutional volume is driving price trend.";
-                                  case 4: return "Temporary profit-taking/re-accumulation. Validate overlap limits.";
-                                  case 5: return "Exhaustion wave. Market sentiment is highly bullish but overextended. Prepare for A-B-C correction.";
-                                  case -1: return "First leg of corrective cycle (Wave A) is pushing prices down. Expect intermediate counter-trend bounce.";
-                                  case -2: return "Wave B corrective bounce is forming. Avoid long-term holds; likely a dead-cat bounce.";
-                                  case -3: return "Final Wave C capitulation is flushing out remaining retail liquidity. Prepare for new cycle.";
-                                  default: return "Market structure is in search of a clean 5-wave motive. Watch key pivots.";
-                                }
-                              })()}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
+                      )}
                     </div>
                   </div>
                 )}
