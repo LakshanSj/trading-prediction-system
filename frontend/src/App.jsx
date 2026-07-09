@@ -118,7 +118,7 @@ function App() {
   const [monitorData, setMonitorData] = useState(null);
 
   // Advanced Indicators & SMC Overlays
-  const [showMA, setShowMA] = useState(false);
+  const [showMA, setShowMA] = useState(true);
   const [showBB, setShowBB] = useState(false);
   const [showOB, setShowOB] = useState(false);
   const [oscillatorTab, setOscillatorTab] = useState('rsi');

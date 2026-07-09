@@ -242,6 +242,12 @@ def get_predictions(ticker: str, interval: str = "1d"):
         df = pd.read_csv(features_path)
         df['Date'] = pd.to_datetime(df['Date'])
         
+        # Legacy fallback: compute WMA 144 and SMMA 5 on the fly if missing from old saved feature CSVs
+        if 'WMA_144' not in df.columns or 'SMMA_5' not in df.columns:
+            from feature_engineer import compute_wma, compute_smma
+            df['WMA_144'] = compute_wma(df['Close'], 144)
+            df['SMMA_5'] = compute_smma(df['Close'], 5)
+        
         # Test predictions split (20% of data)
         split_idx = int(len(df) * 0.8)
         test_df = df.iloc[split_idx:].copy()
