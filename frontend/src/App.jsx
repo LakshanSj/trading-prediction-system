@@ -574,9 +574,10 @@ function App() {
       {/* Admin Panel overlay */}
       {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
 
-      <div className="main-layout">
+      <div className={`main-layout ${!showLeftSidebar ? 'no-left-sidebar' : ''}`} style={!showLeftSidebar ? { gridTemplateColumns: '1fr' } : {}}>
         {/* SIDEBAR CONFIGURATION */}
-        <aside className="sidebar-panel">
+        {showLeftSidebar && (
+          <aside className="sidebar-panel">
           <div className="panel-section">
             <h2 className="section-title"><Search size={16} /> Asset Lookup</h2>
             <form onSubmit={handleSearchSubmit} className="search-form">
@@ -772,6 +773,17 @@ function App() {
             </div>
           </div>
         </aside>
+        )}
+
+        {/* Left Sidebar Circle Chevron Toggle Tab */}
+        <button 
+          className={`sidebar-toggle-tab left-sidebar-tab ${!showLeftSidebar ? 'collapsed' : ''}`}
+          onClick={() => setShowLeftSidebar(!showLeftSidebar)}
+          style={showLeftSidebar ? { left: '308px' } : { left: '8px' }}
+          title={showLeftSidebar ? "Collapse Left Menu" : "Expand Left Menu"}
+        >
+          {showLeftSidebar ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+        </button>
 
         {/* MAIN DISPLAY WORKSPACE */}
         <main className="content-panel">
@@ -907,7 +919,7 @@ function App() {
                       <p>Displays hybrid ARIMA-LSTM predictions along with overlays for moving averages, Bollinger Bands, and Smart Money Concepts (SMC) zones. Includes oscillators and pattern analyzers.</p>
                     </div>
 
-                    <div className="predictions-layout">
+                    <div className="predictions-layout" style={{ position: 'relative' }}>
                       {/* Left Column: Charts */}
                       <div className={`charts-column ${isFullScreen ? 'fullscreen' : ''}`}>
                         <div className="chart-zoom-controls">
@@ -1355,6 +1367,16 @@ function App() {
                           </div>
                         </div>
                       )}
+                      
+                      {/* Right Sidebar Circle Chevron Toggle Tab */}
+                      <button 
+                        className={`sidebar-toggle-tab right-sidebar-tab ${!showRightSidebar ? 'collapsed' : ''}`}
+                        onClick={() => setShowRightSidebar(!showRightSidebar)}
+                        style={showRightSidebar ? { right: '308px' } : { right: '8px' }}
+                        title={showRightSidebar ? "Collapse Analytics Sidebar" : "Expand Analytics Sidebar"}
+                      >
+                        {showRightSidebar ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+                      </button>
                     </div>
                   </div>
                 )}

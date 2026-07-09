@@ -2240,5 +2240,45 @@ body {
   font-family: 'Fira Code', 'Courier New', Consolas, Monaco, monospace !important;
 }
 
+/* Collapsible Sidebar Toggle Tab Styles */
+.main-layout {
+  position: relative;
+}
+
+.sidebar-toggle-tab {
+  position: absolute;
+  top: 25px; /* Floats nicely at the top header height of the panels */
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background-color: #131722;
+  border: 1.5px solid var(--border-color);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 100;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  padding: 0;
+}
+
+.sidebar-toggle-tab:hover {
+  background-color: var(--accent-cyan);
+  color: #000000;
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 10px rgba(0, 242, 254, 0.5);
+}
+
+.left-sidebar-tab {
+  transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.right-sidebar-tab {
+  transition: right 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+
 
 
