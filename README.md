@@ -1,9 +1,8 @@
-# 📈 AI Stock & Crypto Prediction System
+# 📈 AI Stock & Crypto Prediction System (Local Development)
 
 A full-stack hybrid price forecasting system combining **ARIMA**, **PyTorch LSTM** (residual modelling), and **LightGBM** classifiers — with an Explainable AI (SHAP) dashboard, Smart Money Concepts (SMC) analysis, Walk-Forward Validation, model decay monitoring, and a built-in **Admin Logging Panel**.
 
-- **Frontend (Firebase):** https://trading-prediction-system.web.app
-- **Backend (Railway):** https://web-production-22037.up.railway.app
+This setup is optimized for **purely local execution** on your machine.
 
 ---
 
@@ -16,28 +15,44 @@ A full-stack hybrid price forecasting system combining **ARIMA**, **PyTorch LSTM
 | Data Source | yfinance (Yahoo Finance) |
 | Explainability | LightGBM `pred_contrib` (SHAP-like) |
 | Frontend | React 19 + Vite, Recharts, Lucide Icons |
-| Hosting | Firebase Hosting (frontend) + Railway (backend) |
 | Logging | Structured JSON-lines activity log (`logs/admin_activity.jsonl`) |
 
 ---
 
 ## 🚀 Running Locally
 
-### 1. Create & activate virtual environment
+You can launch both the backend and frontend simultaneously with a single PowerShell script:
+
+### The One-Click Way (Windows)
+1. Right-click [start-local.ps1](file:///c:/Drive/Trading/trading-prediction-system/start-local.ps1) and choose **Run with PowerShell**, or execute:
+   ```powershell
+   .\start-local.ps1
+   ```
+2. The script will automatically check if you have virtual environments and frontend dependencies installed, prompt to install them if missing, and launch both servers.
+3. Open your browser to:
+   - **React Dashboard:** `http://localhost:5173`
+   - **FastAPI Interactive Docs:** `http://localhost:8000/docs`
+
+---
+
+### The Manual Way
+
+If you prefer to start them manually in separate terminal windows:
+
+#### 1. Start FastAPI Backend
 ```powershell
+# Create & activate virtual environment (first time)
 py -3.11 -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
-```
 
-### 2. Start FastAPI Backend
-```powershell
+# Run the FastAPI app
 .\.venv\Scripts\python.exe -m uvicorn src.api.main:app --port 8000 --reload
 ```
 - API root: `http://localhost:8000`
 - Interactive docs: `http://localhost:8000/docs`
 - Health check: `http://localhost:8000/health`
 
-### 3. Start React Frontend (in a second terminal)
+#### 2. Start React Frontend
 ```powershell
 cd frontend
 npm install
@@ -45,55 +60,7 @@ npm run dev
 ```
 Dashboard live at: `http://localhost:5173`
 
-> **Note:** Vite proxies all `/api`, `/admin`, and `/health` requests to `http://localhost:8000` automatically — no CORS issues in local dev.
-
----
-
-## 🌐 Production Deployment
-
-### Backend → Railway
-
-1. Push your changes to GitHub (Railway auto-deploys from the connected repo).
-2. Railway uses `nixpacks.toml` to build and `Procfile` to start:
-   ```
-   web: uvicorn src.api.main:app --host 0.0.0.0 --port $PORT
-   ```
-3. Set the `ADMIN_PASSWORD_HASH` environment variable on Railway (see **Changing the Admin Password** below).
-
-### Frontend → Firebase Hosting
-
-1. Set your backend URL in `frontend/.env.production`:
-   ```env
-   VITE_API_URL=https://web-production-22037.up.railway.app
-   ```
-2. Build the production bundle:
-   ```powershell
-   npm run build --prefix frontend
-   ```
-3. Deploy to Firebase:
-   ```powershell
-   firebase deploy --only hosting
-   ```
-   Live at: `https://trading-prediction-system.web.app`
-
-### Hybrid (Local Backend + Public Frontend via ngrok)
-
-Use this if Railway is unavailable and you want to run the ML pipeline locally:
-
-```powershell
-# In one terminal — start backend
-.\.venv\Scripts\python.exe -m uvicorn src.api.main:app --port 8000 --reload
-
-# In another terminal — expose it publicly
-ngrok http --url=https://YOUR_DOMAIN.ngrok-free.dev 8000
-```
-
-Then update `.env.production` with the ngrok URL, rebuild, and redeploy Firebase.
-
-Or use the one-click launcher:
-```powershell
-.\start-backend.ps1
-```
+> **Note:** Vite proxies all `/api`, `/admin`, and `/health` requests to `http://localhost:8000` automatically — no CORS issues during local development.
 
 ---
 
@@ -102,7 +69,6 @@ Or use the one-click launcher:
 A secure admin dashboard is built into the app. Click the **Admin** button in the top-right corner of the dashboard.
 
 ### Default Credentials
-
 | Field | Value |
 |---|---|
 | Username | `adminTrading` |
@@ -122,7 +88,7 @@ Log file location: `logs/admin_activity.jsonl`
 
 ### Step 1 — Generate the SHA-256 hash of your new password
 
-**Option A — PowerShell (Windows):**
+**Option A — PowerShell:**
 ```powershell
 $password = "YourNewPassword123!"
 $bytes = [System.Text.Encoding]::UTF8.GetBytes($password)
@@ -137,30 +103,12 @@ password = "YourNewPassword123!"
 print(hashlib.sha256(password.encode()).hexdigest())
 ```
 
-**Option C — Online tool:**
-Go to https://emn178.github.io/online-tools/sha256.html, type your password, copy the hex output.
-
 ### Step 2 — Set the environment variable
-
-**For Railway (production):**
-1. Go to your Railway project → **Variables** tab
-2. Add (or update) the variable:
-   - Name: `ADMIN_PASSWORD_HASH`
-   - Value: *(the hex hash from Step 1)*
-3. Railway will automatically redeploy with the new password
-
-**For local development:**
 Set it in your terminal session before starting the backend:
 ```powershell
 $env:ADMIN_PASSWORD_HASH = "your_hex_hash_here"
-.\.venv\Scripts\python.exe -m uvicorn src.api.main:app --port 8000 --reload
+.\start-local.ps1
 ```
-
-### Step 3 — Verify
-
-Open the app → click **Admin** → log in with `adminTrading` and your new password.
-
-> **Security note:** Never commit your password or its hash to version control. Always set it as an environment variable on the server.
 
 ---
 
@@ -184,17 +132,14 @@ trading-prediction-system/
 │   │   ├── AdminPanel.jsx     # Admin login + log dashboard component
 │   │   └── App.css            # Full dark-mode design system
 │   ├── .env                   # Local dev (VITE_API_URL= empty, uses Vite proxy)
-│   ├── .env.production        # Production backend URL
 │   └── vite.config.js         # Vite build config + /api /admin /health proxy
 ├── models/                    # Saved model files (gitignored)
 ├── data/                      # Feature-engineered CSVs (gitignored)
 ├── logs/
 │   ├── admin_activity.jsonl   # Admin activity log (all API events)
 │   └── monitoring_*.csv       # Per-ticker daily prediction logs
-├── nixpacks.toml              # Railway build config
-├── Procfile                   # Railway start command
 ├── requirements.txt           # Python dependencies
-└── start-backend.ps1          # One-click local launcher (uvicorn + ngrok)
+└── start-local.ps1            # One-click local launcher (FastAPI + Vite)
 ```
 
 ---
