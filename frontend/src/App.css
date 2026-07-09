@@ -2224,4 +2224,21 @@ body {
   font-size: 9px !important;
 }
 
+/* Custom small tick labels for Recharts axes and reference lines */
+.recharts-cartesian-axis-tick-value {
+  font-size: 8px !important;
+  font-family: 'Fira Code', 'Courier New', Consolas, Monaco, monospace !important;
+}
+
+.recharts-reference-line-label {
+  font-size: 8px !important;
+  font-family: 'Fira Code', 'Courier New', Consolas, Monaco, monospace !important;
+}
+
+.recharts-legend-item-text {
+  font-size: 8.5px !important;
+  font-family: 'Fira Code', 'Courier New', Consolas, Monaco, monospace !important;
+}
+
+
 
