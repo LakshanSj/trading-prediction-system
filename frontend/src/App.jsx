@@ -16,7 +16,9 @@ import {
   ShieldAlert,
   ArrowRight,
   History,
-  Shield
+  Shield,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 import { 
   LineChart, 
@@ -106,6 +108,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('predictions');
   const [backendStatus, setBackendStatus] = useState('checking');
   const [showAdmin, setShowAdmin] = useState(false);
+  const [isFullScreen, setIsFullScreen] = useState(false);
   
   // Data states
   const [tickerStatus, setTickerStatus] = useState(null); // {status, meta}
@@ -453,20 +456,12 @@ function App() {
     
     if (chartZoom === '1w') {
       filterStartMs = maxDate.getTime() - (7 * 24 * 60 * 60 * 1000);
-    } else if (chartZoom === '3d') {
-      filterStartMs = maxDate.getTime() - (3 * 24 * 60 * 60 * 1000);
     } else if (chartZoom === '1d') {
       filterStartMs = maxDate.getTime() - (1 * 24 * 60 * 60 * 1000);
-    } else if (chartZoom === '12h') {
-      filterStartMs = maxDate.getTime() - (12 * 60 * 60 * 1000);
-    } else if (chartZoom === '3h') {
-      filterStartMs = maxDate.getTime() - (3 * 60 * 60 * 1000);
+    } else if (chartZoom === '4h') {
+      filterStartMs = maxDate.getTime() - (4 * 60 * 60 * 1000);
     } else if (chartZoom === '1h') {
       filterStartMs = maxDate.getTime() - (1 * 60 * 60 * 1000);
-    } else if (chartZoom === '30min') {
-      filterStartMs = maxDate.getTime() - (30 * 60 * 1000);
-    } else if (chartZoom === '5min') {
-      filterStartMs = maxDate.getTime() - (5 * 60 * 1000);
     } else if (chartZoom === 'custom') {
       const customStart = customZoomStart ? new Date(customZoomStart).getTime() : 0;
       const customEnd = customZoomEnd ? new Date(customZoomEnd).getTime() : Infinity;
@@ -845,18 +840,14 @@ function App() {
 
                     <div className="predictions-layout">
                       {/* Left Column: Charts */}
-                      <div className="charts-column">
+                      <div className={`charts-column ${isFullScreen ? 'fullscreen' : ''}`}>
                         <div className="chart-zoom-controls">
                           <span className="zoom-label">Zoom Range:</span>
                           <div className="zoom-buttons">
                             {[
-                              { key: '5min', label: '5m' },
-                              { key: '30min', label: '30m' },
                               { key: '1h', label: '1h' },
-                              { key: '3h', label: '3h' },
-                              { key: '12h', label: '12h' },
+                              { key: '4h', label: '4h' },
                               { key: '1d', label: '1d' },
-                              { key: '3d', label: '3d' },
                               { key: '1w', label: '1w' },
                               { key: 'all', label: 'All' },
                               { key: 'custom', label: 'Custom' }
@@ -908,11 +899,22 @@ function App() {
                           >
                             <Settings size={12} /> SMC Order Blocks & Sweeps
                           </button>
+                          <button 
+                            onClick={() => setIsFullScreen(!isFullScreen)} 
+                            className={`overlay-btn highlight-accent ${isFullScreen ? 'active' : ''}`}
+                            title="Toggle Full Screen Chart"
+                          >
+                            {isFullScreen ? (
+                              <><Minimize2 size={12} /> Exit Full Screen</>
+                            ) : (
+                              <><Maximize2 size={12} /> Full Screen</>
+                            )}
+                          </button>
                         </div>
 
                         {/* Price Chart */}
-                        <div className="chart-wrapper">
-                          <ResponsiveContainer width="100%" height={400}>
+                        <div className={`chart-wrapper ${isFullScreen ? 'fullscreen' : ''}`}>
+                          <ResponsiveContainer width="100%" height={isFullScreen ? "100%" : 400}>
                             <LineChart data={getPredictionChartData()}>
                               <CartesianGrid strokeDasharray="3 3" stroke="#2e333d" />
                               <XAxis dataKey="date" stroke="#8a909d" />
