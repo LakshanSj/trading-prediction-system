@@ -1956,11 +1956,7 @@ body {
 /* ── Resizable Price Chart Wrapper ── */
 .charts-column.fullscreen .chart-wrapper.fullscreen {
   flex: none !important; /* Disable flex auto-stretching to allow manual resizing */
-  height: 50vh !important; /* Default starting height */
-  min-height: 180px !important;
-  max-height: 80vh !important;
-  resize: vertical !important;
-  overflow: hidden !important; /* Needed for native resize handle to render */
+  min-height: 150px !important;
   background-color: #0b0f19 !important;
   border: 1px solid rgba(0, 242, 254, 0.15) !important;
   border-radius: 8px !important;
@@ -1971,16 +1967,14 @@ body {
 /* ── Resizable Oscillator/RSI Wrapper ── */
 .charts-column.fullscreen .oscillator-section.fullscreen {
   flex: none !important;
-  height: 25vh !important; /* Default starting height */
-  min-height: 120px !important;
-  max-height: 50vh !important;
-  resize: vertical !important;
-  overflow: hidden !important;
+  min-height: 100px !important;
   margin-top: 0 !important; /* Tighten layout gap */
   padding: 12px 16px !important;
   background-color: #0b0f19 !important;
   border: 1px solid rgba(0, 242, 254, 0.15) !important;
   border-radius: 8px !important;
+  display: flex !important;
+  flex-direction: column !important;
 }
 
 .charts-column.fullscreen .oscillator-chart-wrapper {
@@ -1989,14 +1983,37 @@ body {
   height: calc(100% - 30px) !important; /* Reserve space for sub-tabs */
 }
 
-/* Native Drag Handle Customize */
-.charts-column.fullscreen .chart-wrapper.fullscreen::-webkit-resizer,
-.charts-column.fullscreen .oscillator-section.fullscreen::-webkit-resizer {
-  background-image: linear-gradient(135deg, transparent 50%, var(--accent-cyan) 50%);
-  background-size: 10px 10px;
-  background-repeat: no-repeat;
-  width: 12px;
-  height: 12px;
+/* ── Custom Splitter Drag Bar Divider ── */
+.chart-splitter-bar {
+  height: 8px !important;
+  width: 100% !important;
+  cursor: ns-resize !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background-color: rgba(255, 255, 255, 0.02) !important;
+  user-select: none !important;
+  margin: 2px 0 !important;
+  transition: background-color 0.2s !important;
+  border-radius: 4px !important;
+}
+
+.chart-splitter-bar:hover {
+  background-color: rgba(0, 242, 254, 0.12) !important;
+}
+
+.splitter-line {
+  width: 60px !important;
+  height: 2px !important;
+  background-color: rgba(0, 242, 254, 0.3) !important;
+  border-radius: 2px !important;
+  transition: background-color 0.2s, width 0.2s !important;
+}
+
+.chart-splitter-bar:hover .splitter-line {
+  background-color: var(--accent-cyan) !important;
+  width: 120px !important;
+  box-shadow: 0 0 8px rgba(0, 242, 254, 0.6) !important;
 }
 
 .charts-column.fullscreen .chart-zoom-controls,

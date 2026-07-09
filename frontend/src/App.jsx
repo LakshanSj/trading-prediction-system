@@ -32,7 +32,8 @@ import {
   Legend, 
   ResponsiveContainer, 
   ReferenceLine,
-  Cell
+  Cell,
+  Brush
 } from 'recharts';
 import AdminPanel from './AdminPanel';
 import './App.css';
@@ -153,6 +154,48 @@ function App() {
     const interval = setInterval(checkConnection, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  // Resizable chart heights (used in full screen mode)
+  const [priceChartHeight, setPriceChartHeight] = useState(400);
+  const [oscillatorChartHeight, setOscillatorChartHeight] = useState(180);
+
+  // Esc key to exit full screen mode
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && isFullScreen) {
+        setIsFullScreen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isFullScreen]);
+
+  // Drag handler for the chart splitter divider
+  const handleSplitterDrag = (e) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startPriceHeight = priceChartHeight;
+    const startOscHeight = oscillatorChartHeight;
+
+    const onMouseMove = (moveEvent) => {
+      const deltaY = moveEvent.clientY - startY;
+      
+      // Calculate new heights, enforcing min heights
+      const newPriceHeight = Math.max(150, startPriceHeight + deltaY);
+      const newOscHeight = Math.max(100, startOscHeight - deltaY);
+      
+      setPriceChartHeight(newPriceHeight);
+      setOscillatorChartHeight(newOscHeight);
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
 
   // Update recent searches list when ticker changes
   useEffect(() => {
@@ -917,8 +960,8 @@ function App() {
                         </div>
 
                         {/* Price Chart */}
-                        <div className={`chart-wrapper ${isFullScreen ? 'fullscreen' : ''}`}>
-                          <ResponsiveContainer width="100%" height={isFullScreen ? "100%" : 400}>
+                        <div className={`chart-wrapper ${isFullScreen ? 'fullscreen' : ''}`} style={isFullScreen ? { height: `${priceChartHeight}px` } : {}}>
+                          <ResponsiveContainer width="100%" height="100%">
                             <LineChart data={getPredictionChartData()}>
                               <CartesianGrid strokeDasharray="3 3" stroke="#2e333d" />
                               <XAxis dataKey="date" stroke="#8a909d" />
@@ -967,12 +1010,26 @@ function App() {
                               {showOB && (
                                 <Line type="step" dataKey="bearish_ob_low" name="Bear OB Low" stroke="#f44336" dot={false} strokeWidth={1.0} opacity={0.4} />
                               )}
+                              
+                              {/* Horizontal scroll slider */}
+                              <Brush dataKey="date" height={15} stroke="rgba(0, 242, 254, 0.4)" fill="#0d111a" tickFormatter={() => ''} />
                             </LineChart>
                           </ResponsiveContainer>
                         </div>
 
+                        {/* Interactive Drag Resizer (Only in Full Screen Mode) */}
+                        {isFullScreen && (
+                          <div 
+                            className="chart-splitter-bar"
+                            onMouseDown={handleSplitterDrag}
+                            title="Drag cursor to resize price/oscillator charts"
+                          >
+                            <div className="splitter-line"></div>
+                          </div>
+                        )}
+
                         {/* Oscillator Panel below price chart */}
-                        <div className={`oscillator-section ${isFullScreen ? 'fullscreen' : ''}`}>
+                        <div className={`oscillator-section ${isFullScreen ? 'fullscreen' : ''}`} style={isFullScreen ? { height: `${oscillatorChartHeight}px` } : {}}>
                           <div className="oscillator-tabs">
                             {['rsi', 'stochastic', 'cci'].map(tab => (
                               <button 
@@ -996,6 +1053,7 @@ function App() {
                                   <ReferenceLine y={70} stroke="#ff1744" strokeDasharray="3 3" />
                                   <ReferenceLine y={30} stroke="#00e676" strokeDasharray="3 3" />
                                   <Line type="monotone" dataKey="rsi_14" name="RSI" stroke="#a78bfa" dot={false} strokeWidth={1.5} />
+                                  <Brush dataKey="date" height={15} stroke="rgba(0, 242, 254, 0.4)" fill="#0d111a" tickFormatter={() => ''} />
                                 </LineChart>
                               ) : oscillatorTab === 'stochastic' ? (
                                 <LineChart data={getPredictionChartData()}>
@@ -1007,6 +1065,7 @@ function App() {
                                   <ReferenceLine y={20} stroke="#00e676" strokeDasharray="3 3" />
                                   <Line type="monotone" dataKey="stoch_k" name="%K" stroke="#00f2fe" dot={false} strokeWidth={1.5} />
                                   <Line type="monotone" dataKey="stoch_d" name="%D" stroke="#ff9100" dot={false} strokeWidth={1.5} />
+                                  <Brush dataKey="date" height={15} stroke="rgba(0, 242, 254, 0.4)" fill="#0d111a" tickFormatter={() => ''} />
                                 </LineChart>
                               ) : (
                                 <LineChart data={getPredictionChartData()}>
@@ -1017,6 +1076,7 @@ function App() {
                                   <ReferenceLine y={100} stroke="#ff1744" strokeDasharray="3 3" />
                                   <ReferenceLine y={-100} stroke="#00e676" strokeDasharray="3 3" />
                                   <Line type="monotone" dataKey="cci_20" name="CCI" stroke="#2979ff" dot={false} strokeWidth={1.5} />
+                                  <Brush dataKey="date" height={15} stroke="rgba(0, 242, 254, 0.4)" fill="#0d111a" tickFormatter={() => ''} />
                                 </LineChart>
                               )}
                             </ResponsiveContainer>
