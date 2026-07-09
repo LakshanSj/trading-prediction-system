@@ -50,9 +50,9 @@ training_status = {}
 class TrainRequest(BaseModel):
     ticker: str
     interval: str = "1d"
-    start_date: str = "2015-01-01"
+    start_date: str = "2010-01-01"
     end_date: str = None
-    epochs: int = 15
+    epochs: int = 30
 
 class WfvRequest(BaseModel):
     ticker: str
@@ -62,7 +62,33 @@ class WfvRequest(BaseModel):
     step_size: int = 250
     epochs: int = 5
 
+def standardize_interval(interval: str) -> str:
+    val = interval.lower()
+    if val in ("1w", "1wk"):
+        return "1wk"
+    return val
+
+# Startup migration to rename any _1w.pkl / _1w.pth / etc. to _1wk.pkl / _1wk.pth
+def migrate_weekly_filenames():
+    models_dir = os.path.join(PROJECT_ROOT, "models")
+    if not os.path.exists(models_dir):
+        return
+    for filename in os.listdir(models_dir):
+        if "_1w." in filename:
+            old_path = os.path.join(models_dir, filename)
+            new_filename = filename.replace("_1w.", "_1wk.")
+            new_path = os.path.join(models_dir, new_filename)
+            if not os.path.exists(new_path):
+                try:
+                    os.rename(old_path, new_path)
+                    print(f"Migrated model file: {filename} -> {new_filename}")
+                except Exception as e:
+                    print(f"Error migrating {filename}: {e}")
+
+migrate_weekly_filenames()
+
 def models_exist(ticker: str, interval: str = "1d") -> bool:
+    interval = standardize_interval(interval)
     t = ticker.lower()
     i = interval.lower()
     # Check new format with interval suffix
@@ -87,6 +113,7 @@ def models_exist(ticker: str, interval: str = "1d") -> bool:
     return False
 
 def run_train_task(ticker: str, start_date: str, end_date: str, epochs: int, interval: str = "1d"):
+    interval = standardize_interval(interval)
     ticker_upper = ticker.upper()
     # Change to project root so relative paths in train_pipeline work correctly
     orig_cwd = os.getcwd()
@@ -131,6 +158,7 @@ def health_check():
 
 @app.get("/api/ticker-status")
 def get_ticker_status(ticker: str, interval: str = "1d"):
+    interval = standardize_interval(interval)
     ticker_upper = ticker.upper()
     status_key = f"{ticker_upper}_{interval.upper()}"
     
@@ -187,6 +215,7 @@ def get_ticker_status(ticker: str, interval: str = "1d"):
 
 @app.post("/api/train")
 def train_model(req: TrainRequest, background_tasks: BackgroundTasks):
+    req.interval = standardize_interval(req.interval)
     ticker_upper = req.ticker.upper()
     end = req.end_date or datetime.today().strftime("%Y-%m-%d")
     
@@ -200,6 +229,7 @@ def train_model(req: TrainRequest, background_tasks: BackgroundTasks):
 
 @app.get("/api/predictions")
 def get_predictions(ticker: str, interval: str = "1d"):
+    interval = standardize_interval(interval)
     ticker_upper = ticker.upper()
     if not models_exist(ticker_upper, interval):
         raise HTTPException(status_code=400, detail=f"Model for {ticker_upper} ({interval}) is not trained yet.")
@@ -415,6 +445,7 @@ def get_predictions(ticker: str, interval: str = "1d"):
 
 @app.get("/api/explainability")
 def get_explainability(ticker: str, interval: str = "1d"):
+    interval = standardize_interval(interval)
     ticker_upper = ticker.upper()
     if not models_exist(ticker_upper, interval):
         raise HTTPException(status_code=400, detail=f"Model for {ticker_upper} ({interval}) is not trained yet.")
@@ -487,6 +518,7 @@ def get_explainability(ticker: str, interval: str = "1d"):
 
 @app.post("/api/wfv")
 def run_wfv_endpoint(req: WfvRequest):
+    req.interval = standardize_interval(req.interval)
     ticker_upper = req.ticker.upper()
     t_lower = ticker_upper.lower()
     i_lower = req.interval.lower()
@@ -536,6 +568,7 @@ def run_wfv_endpoint(req: WfvRequest):
 
 @app.post("/api/monitor")
 def run_monitoring_endpoint(ticker: str, interval: str = "1d"):
+    interval = standardize_interval(interval)
     ticker_upper = ticker.upper()
     if not models_exist(ticker_upper, interval):
         raise HTTPException(status_code=400, detail=f"Model for {ticker_upper} ({interval}) is not trained yet.")

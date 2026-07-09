@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -12,7 +12,6 @@ import {
   Play, 
   Search, 
   Calendar, 
-  HelpCircle,
   ShieldAlert,
   ArrowRight,
   History,
@@ -35,13 +34,13 @@ import {
   YAxis, 
   CartesianGrid, 
   Tooltip, 
-  Legend, 
   ResponsiveContainer, 
   ReferenceLine,
-  Cell,
-  Brush
+  Cell
 } from 'recharts';
 import AdminPanel from './AdminPanel';
+import { authService, dbService } from './firebase';
+import UserAuthModal from './components/UserAuthModal';
 import './App.css';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
@@ -69,9 +68,9 @@ function App() {
   // Input states
   const [ticker, setTicker] = useState('AAPL');
   const [tickerInput, setTickerInput] = useState('AAPL');
-  const [startDate, setStartDate] = useState('2015-01-01');
+  const [startDate, setStartDate] = useState('2010-01-01');
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
-  const [epochs, setEpochs] = useState(15);
+  const [epochs, setEpochs] = useState(30);
   
   // Timeframe and chart zoom states
   const [intervalVal, setIntervalVal] = useState('1d');
@@ -80,25 +79,24 @@ function App() {
   const [customZoomEnd, setCustomZoomEnd] = useState('');
 
   // Enforce strict historical range limits per interval to optimize local training speed and prevent yfinance errors
-  const getMinAllowedDate = (interval) => {
+  const getMinAllowedDate = useCallback((interval) => {
     const today = new Date();
-    let yearsBack = 5; // Default is 5 years
+    let yearsBack = 15; // Default is 15 years
     if (interval === '1h') yearsBack = 1;
     else if (interval === '4h') yearsBack = 2; // Intraday Hourly cap is 730 days on yfinance
-    else if (interval === '1w') yearsBack = 10;
+    else if (interval === '1w') yearsBack = 20;
     
     const minDate = new Date();
     minDate.setFullYear(today.getFullYear() - yearsBack);
     return minDate;
-  };
+  }, []);
 
-  const handleIntervalChange = (newInterval) => {
+  const handleIntervalChange = useCallback((newInterval) => {
     setIntervalVal(newInterval);
     const minDateStr = getMinAllowedDate(newInterval).toISOString().split('T')[0];
-    
     // Automatically set default date back to the limit of the new interval
     setStartDate(minDateStr);
-  };
+  }, [getMinAllowedDate]);
   
   // Suggestions & history states
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -106,13 +104,29 @@ function App() {
     try {
       const saved = localStorage.getItem('recent_tickers');
       return saved ? JSON.parse(saved) : [];
-    } catch (e) {
+    } catch {
       return [];
     }
   });
 
   // Navigation & UI states
   const [activeTab, setActiveTab] = useState('predictions');
+  
+  // User Authentication & Logs states
+  const [currentUser, setCurrentUser] = useState(null);
+  const [userLogs, setUserLogs] = useState([]);
+  const [loadingUserLogs, setLoadingUserLogs] = useState(false);
+  const [logFilter, setLogFilter] = useState('all');
+  const [logSearchQuery, setLogSearchQuery] = useState('');
+
+  const isAdmin = currentUser && currentUser.username === 'adminTrading';
+
+  // Helper to log user action — stable reference via useCallback
+  const logUserAction = useCallback((eventType, details) => {
+    if (currentUser) {
+      dbService.logActivity(currentUser.username, currentUser.email, eventType, details);
+    }
+  }, [currentUser]);
   const [backendStatus, setBackendStatus] = useState('checking');
   const [showAdmin, setShowAdmin] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -131,37 +145,101 @@ function App() {
   const [showBB, setShowBB] = useState(false);
   const [showOB, setShowOB] = useState(false);
   const [oscillatorTab, setOscillatorTab] = useState('rsi');
+  const [yScaleType, setYScaleType] = useState('linear');
+  const [predictionRecords, setPredictionRecords] = useState([]);
+  const [loadingRecords, setLoadingRecords] = useState(false);
   
   // Loading & logs states
   const [trainLoading, setTrainLoading] = useState(false);
   const [wfvLoading, setWfvLoading] = useState(false);
   const [monitorLoading, setMonitorLoading] = useState(false);
-  const [generalLoading, setGeneralLoading] = useState(false);
   const [logMessages, setLogMessages] = useState([]);
   
   // Ref for auto-polling ticker status during training
   const pollIntervalRef = useRef(null);
 
-  // Check Backend Connection
+  // Check Backend Connection — polls every 30s to avoid network chatter while idle
   useEffect(() => {
     const checkConnection = async () => {
       try {
-        // Use /health which is proxied to the backend in dev, or absolute URL in prod
         const healthUrl = API_BASE_URL ? `${API_BASE_URL}/health` : '/health';
         const res = await apiFetch(healthUrl);
-        if (res.ok) {
-          setBackendStatus('connected');
-        } else {
-          setBackendStatus('disconnected');
-        }
-      } catch (err) {
+        setBackendStatus(res.ok ? 'connected' : 'disconnected');
+      } catch {
         setBackendStatus('disconnected');
       }
     };
     checkConnection();
-    const interval = setInterval(checkConnection, 10000);
+    const interval = setInterval(checkConnection, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // Auth state listener
+  useEffect(() => {
+    const unsubscribe = authService.onAuthStateChanged((user) => {
+      setCurrentUser(user);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const loadLogs = useCallback(async () => {
+    if (!currentUser) return;
+    setLoadingUserLogs(true);
+    try {
+      const logs = await dbService.fetchUserLogs(currentUser.username);
+      setUserLogs(logs);
+    } catch {
+      // Silently fail; logs are non-critical
+    } finally {
+      setLoadingUserLogs(false);
+    }
+  }, [currentUser]);
+
+  // Fetch logs when active tab is user logs
+  useEffect(() => {
+    if (activeTab === 'userlogs' && currentUser) {
+      loadLogs();
+    }
+  }, [activeTab, currentUser, loadLogs]);
+
+  const loadPredictionRecords = useCallback(async () => {
+    if (!currentUser) return;
+    setLoadingRecords(true);
+    try {
+      const records = await dbService.fetchPredictionRecords();
+      setPredictionRecords(records);
+    } catch {
+      setPredictionRecords([]);
+    } finally {
+      setLoadingRecords(false);
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (activeTab === 'growth') {
+      loadPredictionRecords();
+    }
+  }, [activeTab, loadPredictionRecords]);
+
+  const handleLogout = async () => {
+    if (currentUser) {
+      // Fire-and-forget: do not await logging, to prevent blocking UI on network delays
+      dbService.logActivity(currentUser.username, currentUser.email, 'USER_LOGOUT', { message: `User ${currentUser.username} logged out.` });
+    }
+    try {
+      await authService.logout();
+    } catch (e) {
+      console.error("Logout error:", e);
+    }
+    // Instantly reset local state to ensure snappy routing
+    setCurrentUser(null);
+    setActiveTab('predictions');
+  };
+
+  const handleAuthSuccess = (user) => {
+    setCurrentUser(user);
+    dbService.logActivity(user.username, user.email, 'USER_LOGIN', { message: `User ${user.username} logged in successfully.` });
+  };
 
   // Resizable chart heights (used in full screen mode)
   const [priceChartHeight, setPriceChartHeight] = useState(400);
@@ -254,13 +332,15 @@ function App() {
 
   useEffect(() => {
     loadTickerStatus(ticker, intervalVal);
+    logUserAction('ASSET_SEARCH', { ticker: ticker, timeframe: intervalVal });
     return () => stopStatusPolling();
-  }, [ticker, intervalVal]);
+  }, [ticker, intervalVal, logUserAction]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Polling logic for background training status
   const startStatusPolling = (symbol, currentInterval) => {
     stopStatusPolling();
     setLogMessages(["Training initiated on server...", "Awaiting data download..."]);
+    // Poll every 3s — fast enough to track training while reducing backend load
     pollIntervalRef.current = setInterval(async () => {
       try {
         const res = await apiFetch(`${API_BASE_URL}/api/ticker-status?ticker=${symbol}&interval=${currentInterval}`);
@@ -280,16 +360,16 @@ function App() {
           setTrainLoading(false);
           if (data.status === 'trained') {
             setLogMessages(prev => [...prev, "Training completed successfully!", "Saved models to disk."]);
-            setTicker(symbol); // Refresh data
+            setTicker(symbol);
             fetchPredictionAndExplainability(symbol, currentInterval);
           } else {
             setLogMessages(prev => [...prev, `Training failed: ${data.message}`]);
           }
         }
-      } catch (err) {
-        console.error("Error polling training status", err);
+      } catch {
+        // Network hiccup during polling — will retry next interval
       }
-    }, 2500);
+    }, 3000);
   };
 
   const stopStatusPolling = () => {
@@ -300,25 +380,38 @@ function App() {
   };
 
   const fetchPredictionAndExplainability = async (symbol, currentInterval) => {
-    setGeneralLoading(true);
     try {
-      // Fetch Predictions
-      const predRes = await apiFetch(`${API_BASE_URL}/api/predictions?ticker=${symbol}&interval=${currentInterval}`);
+      // Fetch Predictions and Explainability in parallel
+      const [predRes, expRes] = await Promise.all([
+        apiFetch(`${API_BASE_URL}/api/predictions?ticker=${symbol}&interval=${currentInterval}`),
+        apiFetch(`${API_BASE_URL}/api/explainability?ticker=${symbol}&interval=${currentInterval}`)
+      ]);
       if (predRes.ok) {
-        const predData = await predRes.json();
-        setPredictionData(predData);
+        const predVal = await predRes.json();
+        setPredictionData(predVal);
+        
+        // Save prediction performance record using model trained timestamp
+        if (currentUser && predVal.history && predVal.history.length > 0) {
+          const trainedAt = tickerStatus?.meta?.trained_at || new Date().toISOString();
+          dbService.savePredictionRecord({
+            ticker: symbol,
+            predict: predVal.predicted_direction_tomorrow,
+            accuracy: predVal.directional_accuracy,
+            trained_at: trainedAt
+          }).then(saved => {
+            if (saved) {
+              console.log(`Saved performance record for ${symbol} successfully.`);
+              // If active tab is growth, refresh it
+              if (activeTab === 'growth') {
+                loadPredictionRecords();
+              }
+            }
+          });
+        }
       }
-
-      // Fetch Explainability
-      const expRes = await apiFetch(`${API_BASE_URL}/api/explainability?ticker=${symbol}&interval=${currentInterval}`);
-      if (expRes.ok) {
-        const expData = await expRes.json();
-        setExplainData(expData);
-      }
-    } catch (err) {
-      console.error("Failed to load predictions/explainability", err);
-    } finally {
-      setGeneralLoading(false);
+      if (expRes.ok) setExplainData(await expRes.json());
+    } catch {
+      console.error("Failed to load predictions/explainability");
     }
   };
 
@@ -333,6 +426,7 @@ function App() {
   const triggerTraining = async () => {
     setTrainLoading(true);
     setLogMessages(["Sending training request to backend..."]);
+    logUserAction('MODEL_TRAINING_TRIGGERED', { ticker, interval: intervalVal, start_date: startDate, end_date: endDate, epochs });
     try {
       const res = await apiFetch(`${API_BASE_URL}/api/train`, {
         method: 'POST',
@@ -352,7 +446,7 @@ function App() {
         setLogMessages(prev => [...prev, `Error: ${data.message}`]);
         setTrainLoading(false);
       }
-    } catch (err) {
+    } catch {
       setLogMessages(prev => [...prev, `Connection error during training request.`]);
       setTrainLoading(false);
     }
@@ -360,6 +454,7 @@ function App() {
 
   const triggerWfv = async () => {
     setWfvLoading(true);
+    logUserAction('VALIDATION_RUN_TRIGGERED', { ticker, interval: intervalVal });
     try {
       const res = await apiFetch(`${API_BASE_URL}/api/wfv`, {
         method: 'POST',
@@ -378,7 +473,7 @@ function App() {
         const errData = await res.json();
         alert(`WFV failed: ${errData.detail || 'Unknown error'}`);
       }
-    } catch (err) {
+    } catch {
       alert("Failed to connect to the server for Walk-Forward Validation.");
     } finally {
       setWfvLoading(false);
@@ -387,6 +482,7 @@ function App() {
 
   const triggerMonitoring = async () => {
     setMonitorLoading(true);
+    logUserAction('MONITOR_RUN_TRIGGERED', { ticker, interval: intervalVal });
     try {
       const res = await apiFetch(`${API_BASE_URL}/api/monitor?ticker=${ticker}&interval=${intervalVal}`, {
         method: 'POST'
@@ -399,15 +495,15 @@ function App() {
         const errData = await res.json();
         alert(`Monitoring simulation failed: ${errData.detail || 'Unknown error'}`);
       }
-    } catch (err) {
+    } catch {
       alert("Failed to connect to the server for Daily Monitoring.");
     } finally {
       setMonitorLoading(false);
     }
   };
 
-  // Chart Data preparation and dynamic timeframe slicing
-  const getPredictionChartData = () => {
+  // Chart Data preparation and dynamic timeframe slicing (Memoized for high performance)
+  const chartPoints = useMemo(() => {
     if (!predictionData) return [];
     
     const chartData = [];
@@ -539,12 +635,99 @@ function App() {
     }
     
     return parsedDates.filter(d => d.parsedDate.getTime() >= filterStartMs);
-  };
-  const chartPoints = getPredictionChartData();
-  const latestItem = chartPoints.length > 0 ? chartPoints[chartPoints.length - 1] : null;
-  const latestPrice = latestItem ? latestItem.close : 0;
-  const latestIsBullish = latestItem ? latestItem.close >= latestItem.open : true;
-  const latestPriceColor = latestIsBullish ? '#089981' : '#f23645';
+  }, [predictionData, chartZoom, customZoomStart, customZoomEnd]);
+
+  // Memoize latest-bar derived display values — recomputes only when chartPoints changes
+  const { latestItem, latestPrice, latestIsBullish, latestPriceColor } = useMemo(() => {
+    const item = chartPoints.length > 0 ? chartPoints[chartPoints.length - 1] : null;
+    const price = item ? item.close : 0;
+    const bullish = item ? item.close >= item.open : true;
+    return {
+      latestItem: item,
+      latestPrice: price,
+      latestIsBullish: bullish,
+      latestPriceColor: bullish ? '#089981' : '#f23645'
+    };
+  }, [chartPoints]);
+
+  // Memoize all right-sidebar analytics values — replaces 12 inline IIFEs that ran on every render
+  const sidebarAnalytics = useMemo(() => {
+    const last = chartPoints.length > 0 ? chartPoints[chartPoints.length - 1] : null;
+    const f = (v) => (v != null ? `$${v.toFixed(2)}` : 'N/A');
+    const bosVal = last?.bos ?? 0;
+    const chochVal = last?.choch ?? 0;
+    const sweepVal = last?.liquidity_sweep ?? 0;
+    const fvgVal = last?.fvg ?? 0;
+    const wave = last?.elliott_wave ?? null;
+    const waveLabels = {
+      1: 'Wave 1 - Motive Phase', 2: 'Wave 2 - Correction Phase',
+      3: 'Wave 3 - Strong Trend Phase', 4: 'Wave 4 - Re-accumulation Phase',
+      5: 'Wave 5 - Exhaustion Motive', '-1': 'Corrective Wave A',
+      '-2': 'Corrective Wave B', '-3': 'Corrective Wave C'
+    };
+    const waveDescriptions = {
+      1: 'Impulsive rise starting. Monitor for Wave 2 pullback support.',
+      2: 'Corrective pullback in progress. Look for support confirmation above Wave 1 start.',
+      3: 'Strongest impulse phase active. High institutional volume is driving price trend.',
+      4: 'Temporary profit-taking/re-accumulation. Validate overlap limits.',
+      5: 'Exhaustion wave. Market sentiment is highly bullish but overextended. Prepare for A-B-C correction.',
+      '-1': 'First leg of corrective cycle (Wave A) is pushing prices down. Expect intermediate counter-trend bounce.',
+      '-2': 'Wave B corrective bounce is forming. Avoid long-term holds; likely a dead-cat bounce.',
+      '-3': 'Final Wave C capitulation is flushing out remaining retail liquidity. Prepare for new cycle.'
+    };
+    return {
+      swingHigh: f(last?.last_swing_high),
+      swingLow: f(last?.last_swing_low),
+      bosClass: bosVal === 1 ? 'checklist-status passed' : bosVal === -1 ? 'checklist-status failed' : 'checklist-status pending',
+      bosLabel: bosVal === 1 ? 'Bullish BOS' : bosVal === -1 ? 'Bearish BOS' : 'No Breakout',
+      chochClass: chochVal === 1 ? 'checklist-status passed' : chochVal === -1 ? 'checklist-status failed' : 'checklist-status pending',
+      chochLabel: chochVal === 1 ? 'Bullish CHOCH' : chochVal === -1 ? 'Bearish CHOCH' : 'No Trend Shift',
+      sweepClass: sweepVal !== 0 ? 'checklist-status passed' : 'checklist-status pending',
+      sweepLabel: sweepVal === 1 ? 'Bull Sweep' : sweepVal === -1 ? 'Bear Sweep' : 'Stable Pools',
+      fvgClass: fvgVal !== 0 ? 'checklist-status passed' : 'checklist-status pending',
+      fvgLabel: fvgVal === 1 ? 'Bullish FVG' : fvgVal === -1 ? 'Bearish FVG' : 'No Imbalance',
+      wavePhase: wave != null ? (waveLabels[wave] || 'Awaiting Wave Formation') : 'No Data',
+      waveDescription: wave != null ? (waveDescriptions[wave] || 'Market structure is in search of a clean 5-wave motive. Watch key pivots.') : 'No Data',
+    };
+  }, [chartPoints]);
+
+  if (!currentUser) {
+    return (
+      <UserAuthModal 
+        isOpen={true} 
+        onClose={() => {}} 
+        onAuthSuccess={handleAuthSuccess} 
+        isFullPage={true} 
+      />
+    );
+  }
+
+  if (currentUser && currentUser.status !== 'approved') {
+    return (
+      <div className="user-auth-gateway">
+        <div className="user-auth-card" style={{ textAlign: 'center', maxWidth: '460px' }}>
+          <div className="admin-shield-glow" style={{ margin: '0 auto 20px auto', width: '70px', height: '70px', borderRadius: '50%', background: 'rgba(255, 145, 0, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255, 145, 0, 0.3)' }}>
+            <ShieldAlert size={36} style={{ color: '#ff9100' }} />
+          </div>
+          <h2 style={{ fontSize: '22px', margin: '0 0 10px 0', color: '#fff' }}>Access Pending Approval</h2>
+          <p style={{ color: '#8a909d', fontSize: '14px', lineHeight: '1.5', margin: '0 0 25px 0' }}>
+            Hello, <strong>{currentUser.username}</strong>. Your registered account is currently awaiting administrator review. 
+            Access to predictions and analytics will be unlocked once approved.
+          </p>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ fontSize: '11px', color: '#ffd600', background: 'rgba(255, 214, 0, 0.05)', padding: '10px', borderRadius: '6px', border: '1px solid rgba(255, 214, 0, 0.15)', marginBottom: '10px' }}>
+              ℹ️ Please ask the admin (adminTrading) to approve your access in the Admin logging panel.
+            </div>
+            
+            <button onClick={handleLogout} className="action-btn secondary-btn" style={{ width: '100%', height: '42px', fontSize: '14px', justifyContent: 'center', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              Sign Out / Return to Login
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-container">
@@ -558,19 +741,31 @@ function App() {
           </div>
         </div>
         
-        {/* Header right: status + admin button */}
+        {/* Header right: status + auth + admin button */}
         <div className="header-right">
           <div className={`status-badge ${backendStatus}`}>
             <span className="pulse-dot"></span>
             Backend: {backendStatus.toUpperCase()}
           </div>
-          <button
-            className="admin-trigger-btn"
-            onClick={() => setShowAdmin(true)}
-            title="Open Admin Logging Panel"
-          >
-            <Shield size={14} /> Admin
-          </button>
+
+          <div className="user-profile-menu">
+            <span className="user-email-display" title={currentUser.email}>
+              👤 {currentUser.username} {isAdmin && <span className="admin-pill">ADMIN</span>}
+            </span>
+            <button onClick={handleLogout} className="signout-btn">
+              Sign Out
+            </button>
+          </div>
+
+          {isAdmin && (
+            <button
+              className="admin-trigger-btn"
+              onClick={() => setShowAdmin(true)}
+              title="Open Admin Logging Panel"
+            >
+              <Shield size={14} /> Admin
+            </button>
+          )}
         </div>
       </header>
 
@@ -674,107 +869,111 @@ function App() {
             )}
           </div>
 
-          <div className="panel-section">
-            <h2 className="section-title"><Settings size={16} /> Training Configurations</h2>
-            
-            <div className="config-group">
-              <label><Calendar size={14} /> Historical Range</label>
-              <div className="date-inputs">
-                <input 
-                  type="date" 
-                  value={startDate} 
-                  min={getMinAllowedDate(intervalVal).toISOString().split('T')[0]}
-                  onChange={(e) => {
-                    const minDateStr = getMinAllowedDate(intervalVal).toISOString().split('T')[0];
-                    if (e.target.value < minDateStr) {
-                      setStartDate(minDateStr);
-                    } else {
-                      setStartDate(e.target.value);
-                    }
-                  }}
+          {isAdmin && (
+            <div className="panel-section">
+              <h2 className="section-title"><Settings size={16} /> Training Configurations</h2>
+              
+              <div className="config-group">
+                <label><Calendar size={14} /> Historical Range</label>
+                <div className="date-inputs">
+                  <input 
+                    type="date" 
+                    value={startDate} 
+                    min={getMinAllowedDate(intervalVal).toISOString().split('T')[0]}
+                    onChange={(e) => {
+                      const minDateStr = getMinAllowedDate(intervalVal).toISOString().split('T')[0];
+                      if (e.target.value < minDateStr) {
+                        setStartDate(minDateStr);
+                      } else {
+                        setStartDate(e.target.value);
+                      }
+                    }}
+                    disabled={trainLoading}
+                  />
+                  <input 
+                    type="date" 
+                    value={endDate} 
+                    onChange={(e) => setEndDate(e.target.value)}
+                    disabled={trainLoading}
+                  />
+                </div>
+              </div>
+
+              <div className="config-group">
+                <label>Data Interval / Timeframe</label>
+                <select 
+                  value={intervalVal} 
+                  onChange={(e) => handleIntervalChange(e.target.value)}
                   disabled={trainLoading}
-                />
+                  className="interval-select"
+                >
+                  <option value="1h">1 Hour</option>
+                  <option value="4h">4 Hours</option>
+                  <option value="1d">1 Day (Daily)</option>
+                  <option value="1w">1 Week (Weekly)</option>
+                </select>
+              </div>
+
+              <div className="config-group">
+                <label>LSTM Training Epochs: <span className="highlight-val">{epochs}</span></label>
                 <input 
-                  type="date" 
-                  value={endDate} 
-                  onChange={(e) => setEndDate(e.target.value)}
+                  type="range" 
+                  min="1" 
+                  max="100" 
+                  value={epochs} 
+                  onChange={(e) => setEpochs(parseInt(e.target.value))}
+                  className="epochs-slider"
                   disabled={trainLoading}
                 />
               </div>
-            </div>
 
-            <div className="config-group">
-              <label>Data Interval / Timeframe</label>
-              <select 
-                value={intervalVal} 
-                onChange={(e) => handleIntervalChange(e.target.value)}
-                disabled={trainLoading}
-                className="interval-select"
-              >
-                <option value="1h">1 Hour</option>
-                <option value="4h">4 Hours</option>
-                <option value="1d">1 Day (Daily)</option>
-                <option value="1w">1 Week (Weekly)</option>
-              </select>
-            </div>
-
-            <div className="config-group">
-              <label>LSTM Training Epochs: <span className="highlight-val">{epochs}</span></label>
-              <input 
-                type="range" 
-                min="1" 
-                max="50" 
-                value={epochs} 
-                onChange={(e) => setEpochs(parseInt(e.target.value))}
-                className="epochs-slider"
-                disabled={trainLoading}
-              />
-            </div>
-
-            <button 
-              onClick={triggerTraining} 
-              disabled={trainLoading || backendStatus !== 'connected'} 
-              className="action-btn primary-btn"
-            >
-              {trainLoading ? (
-                <>
-                  <RefreshCw className="spin-icon" size={16} /> Training Pipeline Run...
-                </>
-              ) : (
-                <>
-                  <Play size={16} /> Fetch Data & Train Model
-                </>
-              )}
-            </button>
-          </div>
-
-          <div className="panel-section">
-            <h2 className="section-title"><Activity size={16} /> System Operations</h2>
-            <div className="operation-buttons">
               <button 
-                onClick={triggerWfv} 
-                disabled={trainLoading || wfvLoading || tickerStatus?.status !== 'trained'} 
-                className="action-btn secondary-btn"
+                onClick={triggerTraining} 
+                disabled={trainLoading || backendStatus !== 'connected'} 
+                className="action-btn primary-btn"
               >
-                {wfvLoading ? (
-                  <RefreshCw className="spin-icon" size={16} />
+                {trainLoading ? (
+                  <>
+                    <RefreshCw className="spin-icon" size={16} /> Training Pipeline Run...
+                  </>
                 ) : (
-                  "Run Walk-Forward Validation"
-                )}
-              </button>
-              <button 
-                onClick={triggerMonitoring} 
-                disabled={trainLoading || monitorLoading || tickerStatus?.status !== 'trained'} 
-                className="action-btn secondary-btn"
-              >
-                {monitorLoading ? (
-                  <RefreshCw className="spin-icon" size={16} />
-                ) : (
-                  "Simulate Daily Monitoring"
+                  <>
+                    <Play size={16} /> Fetch Data & Train Model
+                  </>
                 )}
               </button>
             </div>
-          </div>
+          )}
+
+          {isAdmin && (
+            <div className="panel-section">
+              <h2 className="section-title"><Activity size={16} /> System Operations</h2>
+              <div className="operation-buttons">
+                <button 
+                  onClick={triggerWfv} 
+                  disabled={trainLoading || wfvLoading || tickerStatus?.status !== 'trained'} 
+                  className="action-btn secondary-btn"
+                >
+                  {wfvLoading ? (
+                    <RefreshCw className="spin-icon" size={16} />
+                  ) : (
+                    "Run Walk-Forward Validation"
+                  )}
+                </button>
+                <button 
+                  onClick={triggerMonitoring} 
+                  disabled={trainLoading || monitorLoading || tickerStatus?.status !== 'trained'} 
+                  className="action-btn secondary-btn"
+                >
+                  {monitorLoading ? (
+                    <RefreshCw className="spin-icon" size={16} />
+                  ) : (
+                    "Simulate Daily Monitoring"
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
         </aside>
         )}
 
@@ -898,18 +1097,38 @@ function App() {
                 >
                   💡 Explainability (SHAP)
                 </button>
-                <button 
-                  onClick={() => setActiveTab('wfv')} 
-                  className={`tab-link ${activeTab === 'wfv' ? 'active' : ''}`}
-                >
-                  📊 Walk-Forward Validation
-                </button>
-                <button 
-                  onClick={() => setActiveTab('monitor')} 
-                  className={`tab-link ${activeTab === 'monitor' ? 'active' : ''}`}
-                >
-                  🚨 Monitoring & Decay
-                </button>
+                {isAdmin && (
+                  <button 
+                    onClick={() => setActiveTab('wfv')} 
+                    className={`tab-link ${activeTab === 'wfv' ? 'active' : ''}`}
+                  >
+                    📊 Walk-Forward Validation
+                  </button>
+                )}
+                {isAdmin && (
+                  <button 
+                    onClick={() => setActiveTab('monitor')} 
+                    className={`tab-link ${activeTab === 'monitor' ? 'active' : ''}`}
+                  >
+                    🚨 Monitoring & Decay
+                  </button>
+                )}
+                {currentUser && (
+                  <button 
+                    onClick={() => setActiveTab('userlogs')} 
+                    className={`tab-link ${activeTab === 'userlogs' ? 'active' : ''}`}
+                  >
+                    📋 My Activity Logs
+                  </button>
+                )}
+                {currentUser && (
+                  <button 
+                    onClick={() => setActiveTab('growth')} 
+                    className={`tab-link ${activeTab === 'growth' ? 'active' : ''}`}
+                  >
+                    📈 Performance & Growth
+                  </button>
+                )}
               </div>
 
               {/* Tab bodies */}
@@ -991,6 +1210,20 @@ function App() {
                             <Sliders size={12} /> {showRightSidebar ? 'Hide Analytics' : 'Show Analytics'}
                           </button>
                           <button 
+                            onClick={() => setYScaleType('linear')} 
+                            className={`overlay-btn ${yScaleType === 'linear' ? 'active' : ''}`}
+                            title="Normal linear price scale"
+                          >
+                            Normal
+                          </button>
+                          <button 
+                            onClick={() => setYScaleType('log')} 
+                            className={`overlay-btn ${yScaleType === 'log' ? 'active' : ''}`}
+                            title="Logarithmic price scale"
+                          >
+                            Log
+                          </button>
+                          <button 
                             onClick={() => setIsFullScreen(!isFullScreen)} 
                             className={`overlay-btn highlight-accent ${isFullScreen ? 'active' : ''}`}
                             title="Toggle Full Screen Chart"
@@ -1037,11 +1270,11 @@ function App() {
                             </div>
                           </div>
 
-                          <ResponsiveContainer width="100%" height="100%">
-                            <ComposedChart data={getPredictionChartData()}>
+                           <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={chartPoints}>
                               <CartesianGrid strokeDasharray="1 1" stroke="#222632" />
                               <XAxis dataKey="date" stroke="#8a909d" />
-                              <YAxis stroke="#8a909d" domain={['auto', 'auto']} orientation="right" />
+                              <YAxis scale={yScaleType} stroke="#8a909d" domain={['auto', 'auto']} orientation="right" />
                               <Tooltip 
                                 contentStyle={{ backgroundColor: '#131722', borderColor: '#2a2e39', color: '#fff' }}
                               />
@@ -1049,7 +1282,7 @@ function App() {
                               {/* Wick range (high to low) rendered as thin bar */}
                               <Bar dataKey="wick_range" barSize={1.5} name="Wick" tooltipType="none">
                                 {
-                                  getPredictionChartData().map((entry, index) => {
+                                  chartPoints.map((entry, index) => {
                                     const isUp = entry.close >= entry.open;
                                     return <Cell key={`wick-${index}`} fill={isUp ? '#089981' : '#f23645'} stroke={isUp ? '#089981' : '#f23645'} />;
                                   })
@@ -1059,7 +1292,7 @@ function App() {
                               {/* Body range (open to close) rendered as thicker bar */}
                               <Bar dataKey="body_range" barSize={8} name="Candle">
                                 {
-                                  getPredictionChartData().map((entry, index) => {
+                                  chartPoints.map((entry, index) => {
                                     const isUp = entry.close >= entry.open;
                                     return <Cell key={`body-${index}`} fill={isUp ? '#089981' : '#f23645'} stroke={isUp ? '#089981' : '#f23645'} />;
                                   })
@@ -1151,7 +1384,7 @@ function App() {
                             )}
                             <ResponsiveContainer width="100%" height="100%">
                               {oscillatorTab === 'rsi' ? (
-                                <LineChart data={getPredictionChartData()}>
+                                <LineChart data={chartPoints}>
                                   <CartesianGrid strokeDasharray="1 1" stroke="#222632" />
                                   <XAxis dataKey="date" stroke="#8a909d" />
                                   <YAxis stroke="#8a909d" domain={[0, 100]} ticks={[30, 50, 70]} orientation="right" />
@@ -1182,7 +1415,7 @@ function App() {
                                   )}
                                 </LineChart>
                               ) : oscillatorTab === 'stochastic' ? (
-                                <LineChart data={getPredictionChartData()}>
+                                <LineChart data={chartPoints}>
                                   <CartesianGrid strokeDasharray="3 3" stroke="#2e333d" />
                                   <XAxis dataKey="date" stroke="#8a909d" />
                                   <YAxis stroke="#8a909d" domain={[0, 100]} ticks={[20, 80]} />
@@ -1193,7 +1426,7 @@ function App() {
                                   <Line type="monotone" dataKey="stoch_d" name="%D" stroke="#ff9100" dot={false} strokeWidth={1.5} />
                                 </LineChart>
                               ) : (
-                                <LineChart data={getPredictionChartData()}>
+                                <LineChart data={chartPoints}>
                                   <CartesianGrid strokeDasharray="3 3" stroke="#2e333d" />
                                   <XAxis dataKey="date" stroke="#8a909d" />
                                   <YAxis stroke="#8a909d" domain={['auto', 'auto']} />
@@ -1217,92 +1450,32 @@ function App() {
                             <div className="analytics-grid">
                               <div className="analytics-item">
                                 <span className="analytics-label">Swing High</span>
-                                <span className="analytics-value">
-                                  {(() => {
-                                    const list = getPredictionChartData();
-                                    const val = list.length > 0 ? list[list.length - 1].last_swing_high : null;
-                                    return val ? `$${val.toFixed(2)}` : 'N/A';
-                                  })()}
-                                </span>
+                                <span className="analytics-value">{sidebarAnalytics.swingHigh}</span>
                               </div>
                               <div className="analytics-item">
                                 <span className="analytics-label">Swing Low</span>
-                                <span className="analytics-value">
-                                  {(() => {
-                                    const list = getPredictionChartData();
-                                    const val = list.length > 0 ? list[list.length - 1].last_swing_low : null;
-                                    return val ? `$${val.toFixed(2)}` : 'N/A';
-                                  })()}
-                                </span>
+                                <span className="analytics-value">{sidebarAnalytics.swingLow}</span>
                               </div>
                             </div>
 
                             <div className="checklist-item">
                               <span className="checklist-label">Break of Structure (BOS)</span>
-                              <span className={
-                                (() => {
-                                  const list = getPredictionChartData();
-                                  const val = list.length > 0 ? list[list.length - 1].bos : 0;
-                                  return val === 1 ? "checklist-status passed" : val === -1 ? "checklist-status failed" : "checklist-status pending";
-                                })()
-                              }>
-                                {(() => {
-                                  const list = getPredictionChartData();
-                                  const val = list.length > 0 ? list[list.length - 1].bos : 0;
-                                  return val === 1 ? "Bullish BOS" : val === -1 ? "Bearish BOS" : "No Breakout";
-                                })()}
-                              </span>
+                              <span className={sidebarAnalytics.bosClass}>{sidebarAnalytics.bosLabel}</span>
                             </div>
 
                             <div className="checklist-item">
                               <span className="checklist-label">Change of Character (CHOCH)</span>
-                              <span className={
-                                (() => {
-                                  const list = getPredictionChartData();
-                                  const val = list.length > 0 ? list[list.length - 1].choch : 0;
-                                  return val === 1 ? "checklist-status passed" : val === -1 ? "checklist-status failed" : "checklist-status pending";
-                                })()
-                              }>
-                                {(() => {
-                                  const list = getPredictionChartData();
-                                  const val = list.length > 0 ? list[list.length - 1].choch : 0;
-                                  return val === 1 ? "Bullish CHOCH" : val === -1 ? "Bearish CHOCH" : "No Trend Shift";
-                                })()}
-                              </span>
+                              <span className={sidebarAnalytics.chochClass}>{sidebarAnalytics.chochLabel}</span>
                             </div>
 
                             <div className="checklist-item">
                               <span className="checklist-label">Liquidity Sweeps</span>
-                              <span className={
-                                (() => {
-                                  const list = getPredictionChartData();
-                                  const val = list.length > 0 ? list[list.length - 1].liquidity_sweep : 0;
-                                  return val !== 0 ? "checklist-status passed" : "checklist-status pending";
-                                })()
-                              }>
-                                {(() => {
-                                  const list = getPredictionChartData();
-                                  const val = list.length > 0 ? list[list.length - 1].liquidity_sweep : 0;
-                                  return val === 1 ? "Bull Sweep" : val === -1 ? "Bear Sweep" : "Stable Pools";
-                                })()}
-                              </span>
+                              <span className={sidebarAnalytics.sweepClass}>{sidebarAnalytics.sweepLabel}</span>
                             </div>
 
                             <div className="checklist-item">
                               <span className="checklist-label">Active Fair Value Gap</span>
-                              <span className={
-                                (() => {
-                                  const list = getPredictionChartData();
-                                  const val = list.length > 0 ? list[list.length - 1].fvg : 0;
-                                  return val !== 0 ? "checklist-status passed" : "checklist-status pending";
-                                })()
-                              }>
-                                {(() => {
-                                  const list = getPredictionChartData();
-                                  const val = list.length > 0 ? list[list.length - 1].fvg : 0;
-                                  return val === 1 ? "Bullish FVG" : val === -1 ? "Bearish FVG" : "No Imbalance";
-                                })()}
-                              </span>
+                              <span className={sidebarAnalytics.fvgClass}>{sidebarAnalytics.fvgLabel}</span>
                             </div>
                           </div>
 
@@ -1313,22 +1486,7 @@ function App() {
                               <div className="analytics-item" style={{ gridColumn: 'span 2' }}>
                                 <span className="analytics-label">Current Wave Phase</span>
                                 <span className="analytics-value" style={{ color: '#00f2fe' }}>
-                                  {(() => {
-                                    const list = getPredictionChartData();
-                                    if (list.length === 0) return "No Data";
-                                    const wave = list[list.length - 1].elliott_wave;
-                                    switch(wave) {
-                                      case 1: return "Wave 1 - Motive Phase";
-                                      case 2: return "Wave 2 - Correction Phase";
-                                      case 3: return "Wave 3 - Strong Trend Phase";
-                                      case 4: return "Wave 4 - Re-accumulation Phase";
-                                      case 5: return "Wave 5 - Exhaustion Motive";
-                                      case -1: return "Corrective Wave A";
-                                      case -2: return "Corrective Wave B";
-                                      case -3: return "Corrective Wave C";
-                                      default: return "Awaiting Wave Formation";
-                                    }
-                                  })()}
+                                  {sidebarAnalytics.wavePhase}
                                 </span>
                               </div>
                             </div>
@@ -1349,22 +1507,7 @@ function App() {
                             <div style={{ marginTop: '10px', fontSize: '11px', lineHeight: '1.4', padding: '10px', borderRadius: '6px', backgroundColor: 'var(--bg-tertiary)', borderLeft: '3px solid var(--accent-cyan)' }}>
                               <strong>Wave Analysis:</strong>
                               <p style={{ color: 'var(--text-muted)', marginTop: '4px' }}>
-                                {(() => {
-                                  const list = getPredictionChartData();
-                                  if (list.length === 0) return "No Data";
-                                  const wave = list[list.length - 1].elliott_wave;
-                                  switch(wave) {
-                                    case 1: return "Impulsive rise starting. Monitor for Wave 2 pullback support.";
-                                    case 2: return "Corrective pullback in progress. Look for support confirmation above Wave 1 start.";
-                                    case 3: return "Strongest impulse phase active. High institutional volume is driving price trend.";
-                                    case 4: return "Temporary profit-taking/re-accumulation. Validate overlap limits.";
-                                    case 5: return "Exhaustion wave. Market sentiment is highly bullish but overextended. Prepare for A-B-C correction.";
-                                    case -1: return "First leg of corrective cycle (Wave A) is pushing prices down. Expect intermediate counter-trend bounce.";
-                                    case -2: return "Wave B corrective bounce is forming. Avoid long-term holds; likely a dead-cat bounce.";
-                                    case -3: return "Final Wave C capitulation is flushing out remaining retail liquidity. Prepare for new cycle.";
-                                    default: return "Market structure is in search of a clean 5-wave motive. Watch key pivots.";
-                                  }
-                                })()}
+                                {sidebarAnalytics.waveDescription}
                               </p>
                             </div>
                           </div>
@@ -1594,11 +1737,339 @@ function App() {
                     )}
                   </div>
                 )}
+
+                {/* User Activity Logs Tab */}
+                {activeTab === 'userlogs' && currentUser && (
+                  <div className="tab-panel animate-fade-in">
+                    <div className="panel-header-desc" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                      <div>
+                        <h3>My Personal Activity Logs</h3>
+                        <p>Lists all your dashboard interactions and asset lookups. Logs are fetched in real-time from the database.</p>
+                      </div>
+                      <button 
+                        onClick={async () => {
+                          if (window.confirm("Are you sure you want to permanently clear your logs? This action is irreversible.")) {
+                            const count = await dbService.clearUserLogs(currentUser.username);
+                            alert(`Cleared ${count} logs.`);
+                            loadLogs();
+                          }
+                        }}
+                        className="action-btn secondary-btn clear-logs-btn"
+                        style={{ height: '32px', padding: '0 12px', fontSize: '12px' }}
+                      >
+                        Clear My Logs
+                      </button>
+                    </div>
+
+                    <div className="user-logs-controls" style={{ display: 'flex', gap: '12px', margin: '15px 0', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <div className="search-logs-input" style={{ position: 'relative', flex: 1, minWidth: '200px' }}>
+                        <input 
+                          type="text" 
+                          placeholder="Filter logs by keyword or ticker (e.g. AAPL)..." 
+                          value={logSearchQuery}
+                          onChange={(e) => setLogSearchQuery(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '8px 12px',
+                            background: '#131722',
+                            border: '1px solid #2a2e39',
+                            borderRadius: '6px',
+                            color: '#fff',
+                            fontSize: '13px'
+                          }}
+                        />
+                      </div>
+                      <select 
+                        value={logFilter} 
+                        onChange={(e) => setLogFilter(e.target.value)}
+                        style={{
+                          padding: '8px 12px',
+                          background: '#131722',
+                          border: '1px solid #2a2e39',
+                          borderRadius: '6px',
+                          color: '#fff',
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          minWidth: '150px'
+                        }}
+                      >
+                        <option value="all">All Events</option>
+                        <option value="USER_LOGIN">Logins</option>
+                        <option value="USER_LOGOUT">Logouts</option>
+                        <option value="ASSET_SEARCH">Asset Lookups</option>
+                        <option value="MODEL_TRAINING_TRIGGERED">Model Trainings</option>
+                        <option value="VALIDATION_RUN_TRIGGERED">Validation Runs</option>
+                        <option value="MONITOR_RUN_TRIGGERED">Monitoring Runs</option>
+                      </select>
+                      <button 
+                        onClick={loadLogs}
+                        disabled={loadingUserLogs}
+                        className="action-btn secondary-btn"
+                        style={{ height: '34px', minWidth: '70px', padding: '0 12px' }}
+                      >
+                        {loadingUserLogs ? <RefreshCw className="spin-icon" size={14} /> : "Reload"}
+                      </button>
+                    </div>
+
+                    {loadingUserLogs ? (
+                      <div className="tab-empty-state">
+                        <RefreshCw size={24} className="spin-icon" />
+                        <h4>Retrieving logs from Database...</h4>
+                      </div>
+                    ) : (
+                      (() => {
+                        // Client-side filter
+                        const filteredLogs = userLogs.filter(log => {
+                          const matchesType = logFilter === 'all' || log.event_type === logFilter;
+                          const serialized = JSON.stringify(log).toLowerCase();
+                          const matchesQuery = !logSearchQuery || serialized.includes(logSearchQuery.toLowerCase());
+                          return matchesType && matchesQuery;
+                        });
+
+                        return filteredLogs.length > 0 ? (
+                          <div className="wfv-table-container">
+                            <table className="info-table">
+                              <thead>
+                                <tr>
+                                  <th>Timestamp (Local)</th>
+                                  <th>Event Type</th>
+                                  <th>Description / Details</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {filteredLogs.map((log) => (
+                                  <tr key={log.id}>
+                                    <td style={{ color: '#8a909d', fontSize: '12px' }}>{log.timestamp_local}</td>
+                                    <td>
+                                      <span className={`event-badge badge-${log.event_type.toLowerCase()}`}>
+                                        {log.event_type.replace(/_/g, ' ')}
+                                      </span>
+                                    </td>
+                                    <td style={{ fontSize: '13px' }}>
+                                      {log.event_type === 'ASSET_SEARCH' && (
+                                        <span>Searched ticker <strong>{log.details.ticker}</strong> on {log.details.timeframe} interval.</span>
+                                      )}
+                                      {log.event_type === 'MODEL_TRAINING_TRIGGERED' && (
+                                        <span>Triggered hybrid training for <strong>{log.details.ticker}</strong> ({log.details.epochs} epochs, {log.details.interval} data).</span>
+                                      )}
+                                      {log.event_type === 'VALIDATION_RUN_TRIGGERED' && (
+                                        <span>Initiated walk-forward verification for ticker <strong>{log.details.ticker}</strong>.</span>
+                                      )}
+                                      {log.event_type === 'MONITOR_RUN_TRIGGERED' && (
+                                        <span>Simulated accuracy monitor and health metrics check for <strong>{log.details.ticker}</strong>.</span>
+                                      )}
+                                      {log.event_type === 'USER_LOGIN' && (
+                                        <span style={{ color: '#00e676' }}>{log.details.message}</span>
+                                      )}
+                                      {log.event_type === 'USER_LOGOUT' && (
+                                        <span style={{ color: '#ff1744' }}>{log.details.message}</span>
+                                      )}
+                                      {!['ASSET_SEARCH', 'MODEL_TRAINING_TRIGGERED', 'VALIDATION_RUN_TRIGGERED', 'MONITOR_RUN_TRIGGERED', 'USER_LOGIN', 'USER_LOGOUT'].includes(log.event_type) && (
+                                        <span>{JSON.stringify(log.details)}</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <div className="tab-empty-state">
+                            <AlertTriangle size={24} />
+                            <h4>No matching activity logs</h4>
+                            <p>We found no history matching the selected event type or search criteria.</p>
+                          </div>
+                        );
+                      })()
+                    )}
+                  </div>
+                )}
+
+                {/* Performance & Growth Tab */}
+                {activeTab === 'growth' && (
+                  <div className="tab-panel">
+                    <div className="panel-header-desc">
+                      <h3>📈 Model Performance & Growth Tracking</h3>
+                      <p>
+                        Records the historical performance of your trained predictive models. 
+                        Predictions are grouped by month, showing their directional accuracy. 
+                        A model is verified as a <strong>Success</strong> if its accuracy meets or exceeds the 85% threshold.
+                      </p>
+                    </div>
+
+                    {loadingRecords ? (
+                      <div className="tab-empty-state">
+                        <RefreshCw className="spin-icon" size={24} />
+                        <h4>Retrieving performance tracking history...</h4>
+                      </div>
+                    ) : predictionRecords.length > 0 ? (
+                      (() => {
+                        // 1. Group records by month for "System Growth"
+                        const monthlyGroup = {};
+                        predictionRecords.forEach(r => {
+                          const m = r.month || "2026-07";
+                          if (!monthlyGroup[m]) monthlyGroup[m] = [];
+                          monthlyGroup[m].push(r);
+                        });
+                        const sortedMonths = Object.keys(monthlyGroup).sort((a, b) => b.localeCompare(a));
+                        
+                        // 2. Group records by ticker/currency for "Predictions One-by-One"
+                        const tickerGroup = {};
+                        predictionRecords.forEach(r => {
+                          const t = r.ticker || "UNKNOWN";
+                          if (!tickerGroup[t]) tickerGroup[t] = [];
+                          tickerGroup[t].push(r);
+                        });
+                        const sortedTickers = Object.keys(tickerGroup).sort((a, b) => a.localeCompare(b));
+
+                        const monthNames = {
+                          "01": "January", "02": "February", "03": "March", "04": "April",
+                          "05": "May", "06": "June", "07": "July", "08": "August",
+                          "09": "September", "10": "October", "11": "November", "12": "December"
+                        };
+
+                        const formatMonthName = (monthStr) => {
+                          const parts = monthStr.split('-');
+                          return parts.length === 2 ? `${monthNames[parts[1]] || parts[1]} ${parts[0]}` : monthStr;
+                        };
+
+                        return (
+                          <div className="growth-tracker-layout" style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
+                            {/* Monthly System Growth Section */}
+                            <div className="system-growth-section">
+                              <h4 style={{ color: '#fff', fontSize: '16px', marginBottom: '15px', borderLeft: '3px solid #00f2fe', paddingLeft: '10px' }}>
+                                📊 System Growth by Month Group
+                              </h4>
+                              
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
+                                {sortedMonths.map(month => {
+                                  const monthRecords = monthlyGroup[month];
+                                  const total = monthRecords.length;
+                                  const successful = monthRecords.filter(r => r.result === "Success").length;
+                                  const successRate = total > 0 ? ((successful / total) * 100).toFixed(1) : "0.0";
+                                  const progressColor = parseFloat(successRate) >= 70 ? '#00e676' : '#ffd600';
+                                  
+                                  return (
+                                    <div key={month} style={{ background: '#1e222b', border: '1px solid #2e333d', borderRadius: '8px', padding: '18px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <span style={{ fontSize: '15px', fontWeight: 'bold', color: '#fff' }}>{formatMonthName(month)}</span>
+                                        <span style={{ fontSize: '14px', fontWeight: 'bold', color: progressColor }}>
+                                          {successRate}% Success
+                                        </span>
+                                      </div>
+                                      
+                                      {/* Success progress bar */}
+                                      <div style={{ background: '#2a2e39', height: '6px', borderRadius: '3px', width: '100%', overflow: 'hidden' }}>
+                                        <div style={{ background: progressColor, height: '100%', width: `${successRate}%` }}></div>
+                                      </div>
+                                      
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#8a909d', marginTop: '4px' }}>
+                                        <span>Total Runs: <strong style={{ color: '#fff' }}>{total}</strong></span>
+                                        <span>Success (≥85% Accuracy): <strong style={{ color: '#00e676' }}>{successful}</strong></span>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            {/* Predictions Currency wise Section */}
+                            <div className="predictions-one-by-one-section">
+                              <h4 style={{ color: '#fff', fontSize: '16px', marginBottom: '15px', borderLeft: '3px solid #00f2fe', paddingLeft: '10px' }}>
+                                🪙 Currency Prediction History (One by One)
+                              </h4>
+
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                                {sortedTickers.map(tickerSymbol => {
+                                  const tickerRecords = tickerGroup[tickerSymbol];
+                                  // Sort records descending by trained date
+                                  tickerRecords.sort((a, b) => b.trained_at.localeCompare(a.trained_at));
+
+                                  const tickTotal = tickerRecords.length;
+                                  const tickSuccess = tickerRecords.filter(r => r.result === "Success").length;
+                                  const tickRate = tickTotal > 0 ? ((tickSuccess / tickTotal) * 100).toFixed(1) : "0.0";
+
+                                  return (
+                                    <div key={tickerSymbol} className="currency-group-card" style={{ background: '#1e222b', border: '1px solid #2e333d', borderRadius: '10px', padding: '20px' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '1px solid #2e333d', paddingBottom: '10px' }}>
+                                        <span style={{ fontSize: '16px', fontWeight: 'bold', color: '#00f2fe' }}>🪙 {tickerSymbol} Predictions</span>
+                                        <span style={{ fontSize: '12px', color: '#8a909d' }}>
+                                          Total: <strong style={{ color: '#fff' }}>{tickTotal}</strong> | 
+                                          Success (≥85%): <strong style={{ color: '#00e676' }}>{tickSuccess}</strong> | 
+                                          Accuracy: <strong style={{ color: '#fff' }}>{tickRate}%</strong>
+                                        </span>
+                                      </div>
+
+                                      <div className="scroll-table-container">
+                                        <table className="info-table">
+                                          <thead>
+                                            <tr>
+                                              <th>Prediction Trend</th>
+                                              <th>Model Accuracy (%)</th>
+                                              <th>Status (Success ≥85%)</th>
+                                              <th>Trained Month</th>
+                                              <th>Training Date</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {tickerRecords.map((rec, idx) => {
+                                              const isSuccess = rec.result === "Success";
+                                              return (
+                                                <tr key={rec.id || idx}>
+                                                  <td>
+                                                    <span className={`event-badge badge-${rec.predict.toLowerCase()}`} style={{ background: rec.predict === 'Up' ? 'rgba(8, 153, 129, 0.15)' : 'rgba(242, 54, 69, 0.15)', color: rec.predict === 'Up' ? '#089981' : '#f23645', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>
+                                                      {rec.predict === 'Up' ? '📈 BUY (UP)' : '📉 SELL (DOWN)'}
+                                                    </span>
+                                                  </td>
+                                                  <td className="highlight-metric" style={{ fontWeight: 'bold', color: '#fff' }}>
+                                                    {(rec.accuracy * 100).toFixed(1)}%
+                                                  </td>
+                                                  <td>
+                                                    <span style={{ 
+                                                      display: 'inline-flex', 
+                                                      alignItems: 'center', 
+                                                      gap: '4px',
+                                                      color: isSuccess ? '#00e676' : '#ff1744', 
+                                                      fontWeight: 'bold',
+                                                      fontSize: '13px' 
+                                                    }}>
+                                                      {isSuccess ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                                                      {isSuccess ? "Success" : "Failed"}
+                                                    </span>
+                                                  </td>
+                                                  <td style={{ color: '#fff', fontSize: '13px' }}>{formatMonthName(rec.month)}</td>
+                                                  <td style={{ color: '#8a909d', fontSize: '12px' }}>
+                                                    {new Date(rec.trained_at).toLocaleString()}
+                                                  </td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()
+                    ) : (
+                      <div className="tab-empty-state">
+                        <AlertTriangle size={24} />
+                        <h4>No performance records saved</h4>
+                        <p>No model predictions have been recorded yet. Click 'Fetch Data & Train Model' to populate records.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
         </main>
       </div>
+
     </div>
   );
 }

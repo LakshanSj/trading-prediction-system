@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Shield,
-  LogOut,
   RefreshCw,
   Trash2,
   Activity,
@@ -9,8 +8,6 @@ import {
   AlertTriangle,
   CheckCircle,
   XCircle,
-  Eye,
-  EyeOff,
   Terminal,
   TrendingUp,
   Zap,
@@ -21,6 +18,8 @@ import {
   Server,
   Database
 } from 'lucide-react';
+
+import { dbService } from './firebase';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
@@ -120,35 +119,67 @@ export default function AdminPanel({ onClose }) {
   // Auth state
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [token, setToken] = useState(() => sessionStorage.getItem('admin_token') || '');
-  const [loginUsername, setLoginUsername] = useState('adminTrading');
-  const [loginPassword, setLoginPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
-  const [loginLoading, setLoginLoading] = useState(false);
 
   // Data state
   const [logs, setLogs] = useState([]);
   const [stats, setStats] = useState(null);
+  const [userList, setUserList] = useState([]);
   const [activeTab, setActiveTab] = useState('logs');
   const [filter, setFilter] = useState('all');
   const [logsLoading, setLogsLoading] = useState(false);
   const [statsLoading, setStatsLoading] = useState(false);
+  const [userListLoading, setUserListLoading] = useState(false);
   const [clearConfirm, setClearConfirm] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
 
-  // ── Verify existing token on mount ─────────────────────────────────────────
-  useEffect(() => {
-    if (!token) return;
-    apiFetch(`${API_BASE_URL}/admin/verify`, {
-      headers: { Authorization: token }
-    })
-      .then(r => r.json())
-      .then(d => {
-        if (d.valid) setIsLoggedIn(true);
-        else { sessionStorage.removeItem('admin_token'); setToken(''); }
-      })
-      .catch(() => { sessionStorage.removeItem('admin_token'); setToken(''); });
+  // ── Auto-Login to Backend ──────────────────────────────────────────────────
+  const performAutoLogin = useCallback(async () => {
+    setLoginError('');
+    try {
+      const res = await apiFetch(`${API_BASE_URL}/admin/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'adminTrading', password: 'Admin@Trading2025!' })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setToken(data.token);
+        sessionStorage.setItem('admin_token', data.token);
+        setIsLoggedIn(true);
+      } else {
+        setLoginError(data.detail || 'Authorization failed. Credentials might have changed.');
+      }
+    } catch {
+      setLoginError('Cannot connect to backend. Ensure the python server is running.');
+    }
   }, []);
+
+  // ── Verify existing token or trigger auto-login on mount ───────────────────
+  useEffect(() => {
+    if (token) {
+      apiFetch(`${API_BASE_URL}/admin/verify`, {
+        headers: { Authorization: token }
+      })
+        .then(r => r.json())
+        .then(d => {
+          if (d.valid) {
+            setIsLoggedIn(true);
+          } else {
+            sessionStorage.removeItem('admin_token');
+            setToken('');
+            performAutoLogin();
+          }
+        })
+        .catch(() => {
+          sessionStorage.removeItem('admin_token');
+          setToken('');
+          performAutoLogin();
+        });
+    } else {
+      performAutoLogin();
+    }
+  }, [token, performAutoLogin]);
 
   // ── Fetch logs ──────────────────────────────────────────────────────────────
   const fetchLogs = useCallback(async () => {
@@ -185,54 +216,48 @@ export default function AdminPanel({ onClose }) {
     }
   }, [token]);
 
-  useEffect(() => {
-    if (!isLoggedIn) return;
-    fetchLogs();
-    fetchStats();
-  }, [isLoggedIn, fetchLogs, fetchStats]);
-
-  useEffect(() => {
-    if (isLoggedIn) fetchLogs();
-  }, [filter]);
-
-  // ── Login ───────────────────────────────────────────────────────────────────
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setLoginError('');
-    setLoginLoading(true);
+  // ── Fetch user lists ────────────────────────────────────────────────────────
+  const fetchUserLists = useCallback(async () => {
+    setUserListLoading(true);
     try {
-      const res = await apiFetch(`${API_BASE_URL}/admin/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: loginUsername, password: loginPassword })
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setToken(data.token);
-        sessionStorage.setItem('admin_token', data.token);
-        setIsLoggedIn(true);
-      } else {
-        setLoginError(data.detail || 'Invalid credentials. Please try again.');
-      }
-    } catch {
-      setLoginError('Cannot connect to backend. Ensure the server is running.');
+      const statusParam = activeTab === 'pending_users' ? 'pending' : 'approved';
+      const list = await dbService.fetchUsers(statusParam);
+      list.sort((a, b) => a.username.localeCompare(b.username));
+      setUserList(list);
+    } catch (err) {
+      console.error("Failed to load users:", err);
+      setUserList([]);
     } finally {
-      setLoginLoading(false);
+      setUserListLoading(false);
+    }
+  }, [activeTab]);
+
+  const handleUpdateStatus = async (username, newStatus) => {
+    const success = await dbService.updateUserStatus(username, newStatus);
+    if (success) {
+      setStatusMsg(`✅ Access status for "${username}" set to ${newStatus}.`);
+      setTimeout(() => setStatusMsg(''), 4000);
+      fetchUserLists();
+    } else {
+      setStatusMsg(`❌ Failed to update access status for "${username}".`);
+      setTimeout(() => setStatusMsg(''), 4000);
     }
   };
 
-  // ── Logout ──────────────────────────────────────────────────────────────────
-  const handleLogout = async () => {
-    await apiFetch(`${API_BASE_URL}/admin/logout`, {
-      method: 'POST',
-      headers: { Authorization: token }
-    }).catch(() => {});
-    sessionStorage.removeItem('admin_token');
-    setToken('');
-    setIsLoggedIn(false);
-    setLogs([]);
-    setStats(null);
-  };
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    if (activeTab === 'logs') {
+      fetchLogs();
+    } else if (activeTab === 'stats') {
+      fetchStats();
+    } else if (activeTab === 'pending_users' || activeTab === 'approved_users') {
+      fetchUserLists();
+    }
+  }, [isLoggedIn, activeTab, fetchLogs, fetchStats, fetchUserLists]);
+
+  useEffect(() => {
+    if (isLoggedIn && activeTab === 'logs') fetchLogs();
+  }, [filter, activeTab, isLoggedIn, fetchLogs]);
 
   // ── Clear logs ──────────────────────────────────────────────────────────────
   const handleClearLogs = async () => {
@@ -257,65 +282,29 @@ export default function AdminPanel({ onClose }) {
   if (!isLoggedIn) {
     return (
       <div className="admin-overlay">
-        <div className="admin-modal admin-login-modal">
-          {/* Close button */}
+        <div className="admin-modal admin-login-modal" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '220px', padding: '30px' }}>
           <button className="admin-close-btn" onClick={onClose}>✕</button>
-
-          <div className="admin-login-header">
-            <div className="admin-shield-glow">
-              <Shield size={40} />
+          
+          {loginError ? (
+            <div style={{ textAlign: 'center' }}>
+              <AlertTriangle size={36} style={{ color: '#ff1744', marginBottom: '15px' }} />
+              <h3 style={{ margin: '0 0 10px 0', fontSize: '18px', color: '#fff' }}>Connection Failed</h3>
+              <p style={{ color: '#8a909d', fontSize: '13px', margin: '0 0 15px 0' }}>{loginError}</p>
+              <button 
+                onClick={performAutoLogin} 
+                className="admin-login-btn" 
+                style={{ width: 'auto', display: 'inline-block', padding: '6px 20px', fontSize: '13px' }}
+              >
+                Retry Authorization
+              </button>
             </div>
-            <h2>Admin Access</h2>
-            <p>Restricted to authorised personnel only</p>
-          </div>
-
-          <form className="admin-login-form" onSubmit={handleLogin}>
-            <div className="admin-field">
-              <label><User size={13} /> Username</label>
-              <input
-                type="text"
-                value={loginUsername}
-                onChange={e => setLoginUsername(e.target.value)}
-                autoComplete="username"
-                required
-              />
+          ) : (
+            <div style={{ textAlign: 'center' }}>
+              <RefreshCw size={36} className="spin-icon" style={{ color: '#00f2fe', marginBottom: '15px' }} />
+              <h3 style={{ margin: '0 0 10px 0', fontSize: '18px', color: '#fff' }}>Connecting to Admin Panel...</h3>
+              <p style={{ color: '#8a909d', fontSize: '13px', margin: '0' }}>Establishing secure backend authorization</p>
             </div>
-
-            <div className="admin-field">
-              <label><Shield size={13} /> Password</label>
-              <div className="password-field-wrapper">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={loginPassword}
-                  onChange={e => setLoginPassword(e.target.value)}
-                  placeholder="Enter admin password"
-                  autoComplete="current-password"
-                  required
-                />
-                <button
-                  type="button"
-                  className="show-pw-btn"
-                  onClick={() => setShowPassword(s => !s)}
-                >
-                  {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
-                </button>
-              </div>
-            </div>
-
-            {loginError && (
-              <div className="admin-error-msg">
-                <XCircle size={14} /> {loginError}
-              </div>
-            )}
-
-            <button type="submit" className="admin-login-btn" disabled={loginLoading}>
-              {loginLoading ? <><RefreshCw size={14} className="spin-icon" /> Authenticating...</> : 'Login as Admin'}
-            </button>
-          </form>
-
-          <p className="admin-hint">
-            Default credentials — Username: <code>adminTrading</code> · Password: <code>Admin@Trading2025!</code>
-          </p>
+          )}
         </div>
       </div>
     );
@@ -335,11 +324,15 @@ export default function AdminPanel({ onClose }) {
             </span>
           </div>
           <div className="admin-dash-actions">
-            <button className="admin-action-btn" onClick={() => { fetchLogs(); fetchStats(); }}>
+            <button className="admin-action-btn" onClick={() => {
+              if (activeTab === 'pending_users' || activeTab === 'approved_users') {
+                fetchUserLists();
+              } else {
+                fetchLogs();
+                fetchStats();
+              }
+            }}>
               <RefreshCw size={13} /> Refresh
-            </button>
-            <button className="admin-action-btn danger" onClick={handleLogout}>
-              <LogOut size={13} /> Logout
             </button>
             <button className="admin-close-btn" onClick={onClose}>✕</button>
           </div>
@@ -358,6 +351,18 @@ export default function AdminPanel({ onClose }) {
             onClick={() => setActiveTab('stats')}
           >
             <BarChart2 size={13} /> System Statistics
+          </button>
+          <button
+            className={`admin-tab-btn ${activeTab === 'pending_users' ? 'active' : ''}`}
+            onClick={() => setActiveTab('pending_users')}
+          >
+            <User size={13} style={{ color: '#ffd600' }} /> Pending Access
+          </button>
+          <button
+            className={`admin-tab-btn ${activeTab === 'approved_users' ? 'active' : ''}`}
+            onClick={() => setActiveTab('approved_users')}
+          >
+            <CheckCircle size={13} style={{ color: '#00e676' }} /> Approved Access
           </button>
         </div>
 
@@ -467,6 +472,124 @@ export default function AdminPanel({ onClose }) {
               <div className="admin-empty">
                 <BarChart2 size={32} />
                 <p>No statistics available yet.</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Pending Users Tab ── */}
+        {activeTab === 'pending_users' && (
+          <div className="admin-tab-content">
+            <div className="panel-desc" style={{ marginBottom: '15px' }}>
+              <h4 style={{ margin: '0 0 5px 0', fontSize: '15px', color: '#ffd600' }}>Pending Access Requests</h4>
+              <p style={{ margin: 0, color: '#8a909d', fontSize: '12px' }}>
+                Accounts listed below have registered but are currently blocked from entering the system. Click "Approve Access" to authorize them.
+              </p>
+            </div>
+
+            {statusMsg && <div className="admin-status-msg" style={{ marginBottom: '10px' }}>{statusMsg}</div>}
+            
+            {userListLoading ? (
+              <div className="admin-loading" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '30px', color: '#8a909d', gap: '8px' }}>
+                <RefreshCw size={18} className="spin-icon" />
+                <span>Loading users list...</span>
+              </div>
+            ) : userList.length === 0 ? (
+              <div className="admin-empty-state" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '30px', background: '#131722', border: '1px dashed #2a2e39', borderRadius: '8px', color: '#8a909d', gap: '10px' }}>
+                <CheckCircle size={24} style={{ color: '#00e676' }} />
+                <span>No pending registrations found. All users have access.</span>
+              </div>
+            ) : (
+              <div className="admin-table-wrapper" style={{ border: '1px solid #2a2e39', borderRadius: '8px', background: '#131722', overflow: 'hidden' }}>
+                <table className="admin-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                  <thead>
+                    <tr style={{ background: '#1c2030', color: '#8a909d', borderBottom: '1px solid #2a2e39' }}>
+                      <th style={{ padding: '10px 15px', fontWeight: '600' }}>Username</th>
+                      <th style={{ padding: '10px 15px', fontWeight: '600' }}>Email Address</th>
+                      <th style={{ padding: '10px 15px', fontWeight: '600' }}>Registration Date</th>
+                      <th style={{ padding: '10px 15px', fontWeight: '600', textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {userList.map(user => (
+                      <tr key={user.uid} style={{ borderBottom: '1px solid #2a2e39' }}>
+                        <td style={{ padding: '10px 15px', color: '#fff', fontWeight: '600' }}>{user.username}</td>
+                        <td style={{ padding: '10px 15px', color: '#b9bec7' }}>{user.email}</td>
+                        <td style={{ padding: '10px 15px', color: '#8a909d', fontSize: '12px' }}>
+                          {user.created_at ? new Date(user.created_at).toLocaleString() : 'N/A'}
+                        </td>
+                        <td style={{ padding: '10px 15px', textAlign: 'right' }}>
+                          <button 
+                            className="action-btn-green"
+                            onClick={() => handleUpdateStatus(user.username, 'approved')}
+                            style={{ background: 'rgba(0, 230, 118, 0.1)', color: '#00e676', border: '1px solid rgba(0, 230, 118, 0.3)', padding: '5px 12px', borderRadius: '4px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s' }}
+                          >
+                            Approve Access
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Approved Users Tab ── */}
+        {activeTab === 'approved_users' && (
+          <div className="admin-tab-content">
+            <div className="panel-desc" style={{ marginBottom: '15px' }}>
+              <h4 style={{ margin: '0 0 5px 0', fontSize: '15px', color: '#00e676' }}>Approved Access Accounts</h4>
+              <p style={{ margin: 0, color: '#8a909d', fontSize: '12px' }}>
+                These users currently have full authorization to access the dashboards. Click "Revoke Access" to move them back to the pending list.
+              </p>
+            </div>
+
+            {statusMsg && <div className="admin-status-msg" style={{ marginBottom: '10px' }}>{statusMsg}</div>}
+            
+            {userListLoading ? (
+              <div className="admin-loading" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '30px', color: '#8a909d', gap: '8px' }}>
+                <RefreshCw size={18} className="spin-icon" />
+                <span>Loading users list...</span>
+              </div>
+            ) : userList.filter(u => u.username !== 'adminTrading').length === 0 ? (
+              <div className="admin-empty-state" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '30px', background: '#131722', border: '1px dashed #2a2e39', borderRadius: '8px', color: '#8a909d', gap: '10px' }}>
+                <AlertTriangle size={24} style={{ color: '#ff9100' }} />
+                <span>No guest accounts are currently approved. Only adminTrading has active dashboard access.</span>
+              </div>
+            ) : (
+              <div className="admin-table-wrapper" style={{ border: '1px solid #2a2e39', borderRadius: '8px', background: '#131722', overflow: 'hidden' }}>
+                <table className="admin-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                  <thead>
+                    <tr style={{ background: '#1c2030', color: '#8a909d', borderBottom: '1px solid #2a2e39' }}>
+                      <th style={{ padding: '10px 15px', fontWeight: '600' }}>Username</th>
+                      <th style={{ padding: '10px 15px', fontWeight: '600' }}>Email Address</th>
+                      <th style={{ padding: '10px 15px', fontWeight: '600' }}>Registration Date</th>
+                      <th style={{ padding: '10px 15px', fontWeight: '600', textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {userList.filter(u => u.username !== 'adminTrading').map(user => (
+                      <tr key={user.uid} style={{ borderBottom: '1px solid #2a2e39' }}>
+                        <td style={{ padding: '10px 15px', color: '#fff', fontWeight: '600' }}>{user.username}</td>
+                        <td style={{ padding: '10px 15px', color: '#b9bec7' }}>{user.email}</td>
+                        <td style={{ padding: '10px 15px', color: '#8a909d', fontSize: '12px' }}>
+                          {user.created_at ? new Date(user.created_at).toLocaleString() : 'N/A'}
+                        </td>
+                        <td style={{ padding: '10px 15px', textAlign: 'right' }}>
+                          <button 
+                            className="action-btn-red"
+                            onClick={() => handleUpdateStatus(user.username, 'pending')}
+                            style={{ background: 'rgba(242, 54, 69, 0.1)', color: '#ff5252', border: '1px solid rgba(242, 54, 69, 0.3)', padding: '5px 12px', borderRadius: '4px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s' }}
+                          >
+                            Revoke Access (Pending)
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>

@@ -87,12 +87,21 @@ def detect_pivots_and_smc(df: pd.DataFrame, w: int = 5) -> pd.DataFrame:
     last_bear_ob_high = 0.0
     last_bear_ob_low = 0.0
     
+    # Convert series/columns to NumPy arrays for fast direct index access
+    close = df['Close'].values
+    open_val = df['Open'].values
+    high = df['High'].values
+    low = df['Low'].values
+    sw_high_arr = df['Last_Swing_High'].values
+    sw_low_arr = df['Last_Swing_Low'].values
+    sma_50_arr = sma_50.values
+    
     for i in range(1, n):
-        close_curr = df.loc[i, 'Close']
-        close_prev = df.loc[i-1, 'Close']
-        sw_high = df.loc[i, 'Last_Swing_High']
-        sw_low = df.loc[i, 'Last_Swing_Low']
-        trend_bull = close_curr > sma_50.loc[i]
+        close_curr = close[i]
+        close_prev = close[i-1]
+        sw_high = sw_high_arr[i]
+        sw_low = sw_low_arr[i]
+        trend_bull = close_curr > sma_50_arr[i]
         
         # Bullish Breakout (breaking above previous swing high)
         if close_curr > sw_high and close_prev <= sw_high:
@@ -103,10 +112,10 @@ def detect_pivots_and_smc(df: pd.DataFrame, w: int = 5) -> pd.DataFrame:
             # Bullish Order Block: last down candle (Close < Open) in past 5 bars
             ob_idx = i
             for k in range(max(0, i-5), i):
-                if df.loc[k, 'Close'] < df.loc[k, 'Open']:
+                if close[k] < open_val[k]:
                     ob_idx = k
-            last_bull_ob_high = df.loc[ob_idx, 'High']
-            last_bull_ob_low = df.loc[ob_idx, 'Low']
+            last_bull_ob_high = high[ob_idx]
+            last_bull_ob_low = low[ob_idx]
             
         # Bearish Breakout (breaking below previous swing low)
         elif close_curr < sw_low and close_prev >= sw_low:
@@ -117,10 +126,10 @@ def detect_pivots_and_smc(df: pd.DataFrame, w: int = 5) -> pd.DataFrame:
             # Bearish Order Block: last up candle (Close > Open) in past 5 bars
             ob_idx = i
             for k in range(max(0, i-5), i):
-                if df.loc[k, 'Close'] > df.loc[k, 'Open']:
+                if close[k] > open_val[k]:
                     ob_idx = k
-            last_bear_ob_high = df.loc[ob_idx, 'High']
-            last_bear_ob_low = df.loc[ob_idx, 'Low']
+            last_bear_ob_high = high[ob_idx]
+            last_bear_ob_low = low[ob_idx]
             
         bull_ob_high[i] = last_bull_ob_high
         bull_ob_low[i] = last_bull_ob_low
@@ -160,11 +169,14 @@ def compute_elliott_waves(df: pd.DataFrame, w: int = 5) -> pd.Series:
     peak_indices = np.where(is_peak)[0]
     trough_indices = np.where(is_trough)[0]
     
+    high_vals = df['High'].values
+    low_vals = df['Low'].values
+    
     all_pivots = []
     for idx in peak_indices:
-        all_pivots.append((idx - w, 'High', df.loc[idx - w, 'High'], idx))
+        all_pivots.append((idx - w, 'High', float(high_vals[idx - w]), idx))
     for idx in trough_indices:
-        all_pivots.append((idx - w, 'Low', df.loc[idx - w, 'Low'], idx))
+        all_pivots.append((idx - w, 'Low', float(low_vals[idx - w]), idx))
         
     all_pivots = sorted(all_pivots, key=lambda x: x[0])
     
@@ -174,13 +186,10 @@ def compute_elliott_waves(df: pd.DataFrame, w: int = 5) -> pd.Series:
         if conf_idx < n:
             confirmed_pivots_by_row[conf_idx].append(p)
             
-    current_pivots = []
+    alternating = []
     for i in range(n):
-        current_pivots.extend(confirmed_pivots_by_row[i])
-        
-        # Clean up to ensure alternating High/Low pivots
-        alternating = []
-        for p in current_pivots:
+        new_pivots = confirmed_pivots_by_row[i]
+        for p in new_pivots:
             if not alternating:
                 alternating.append(p)
             else:
@@ -272,6 +281,90 @@ def compute_wma(series, period=144):
 
 def compute_smma(series, period=5):
     return series.ewm(alpha=1 / period, adjust=False).mean()
+
+def compute_pdf_patterns(df: pd.DataFrame, config: dict) -> pd.DataFrame:
+    """
+    Computes technical pattern features based on the extracted PDF strategy config.
+    """
+    df = df.copy()
+    close = df['Close']
+    open_val = df['Open']
+    high = df['High']
+    low = df['Low']
+    body = (close - open_val).abs()
+    hl_range = high - low + 1e-10
+    
+    # 1. Candlestick patterns
+    if config.get("hammer"):
+        lower_shadow = np.where(close > open_val, open_val - low, close - low)
+        upper_shadow = np.where(close > open_val, high - close, high - open_val)
+        df['CDL_Hammer'] = ((lower_shadow >= 1.5 * body) & (upper_shadow <= 0.3 * body)).astype(int)
+        
+    if config.get("inverted_hammer"):
+        lower_shadow = np.where(close > open_val, open_val - low, close - low)
+        upper_shadow = np.where(close > open_val, high - close, high - open_val)
+        df['CDL_Inverted_Hammer'] = ((upper_shadow >= 1.5 * body) & (lower_shadow <= 0.3 * body)).astype(int)
+        
+    if config.get("shooting_star"):
+        lower_shadow = np.where(close > open_val, open_val - low, close - low)
+        upper_shadow = np.where(close > open_val, high - close, high - open_val)
+        df['CDL_Shooting_Star'] = ((close < open_val) & (upper_shadow >= 1.5 * body) & (lower_shadow <= 0.3 * body)).astype(int)
+        
+    if config.get("doji"):
+        df['CDL_Doji'] = (body <= 0.1 * hl_range).astype(int)
+        
+    if config.get("bullish_engulfing"):
+        df['CDL_Bullish_Engulfing'] = (
+            (close > open_val) & 
+            (close.shift(1) < open_val.shift(1)) & 
+            (close > open_val.shift(1)) & 
+            (open_val < close.shift(1))
+        ).astype(int)
+        
+    if config.get("bearish_engulfing"):
+        df['CDL_Bearish_Engulfing'] = (
+            (close < open_val) & 
+            (close.shift(1) > open_val.shift(1)) & 
+            (close < open_val.shift(1)) & 
+            (open_val > close.shift(1))
+        ).astype(int)
+        
+    if config.get("marubozu"):
+        df['CDL_Marubozu'] = (body >= 0.9 * hl_range).astype(int)
+        
+    # 2. Chart patterns
+    if config.get("double_top"):
+        df['Pattern_Double_Top'] = (
+            (high >= df['Last_Swing_High'] * 0.99) & 
+            (high <= df['Last_Swing_High'] * 1.01) & 
+            (close < open_val)
+        ).astype(int)
+        
+    if config.get("double_bottom"):
+        df['Pattern_Double_Bottom'] = (
+            (low >= df['Last_Swing_Low'] * 0.99) & 
+            (low <= df['Last_Swing_Low'] * 1.01) & 
+            (close > open_val)
+        ).astype(int)
+        
+    # 3. SMC concepts
+    if config.get("mitigation_blocks"):
+        df['SMC_Breaker_Bullish'] = (
+            (close > df['Bearish_OB_High']) & 
+            (close.shift(1) <= df['Bearish_OB_High']) &
+            (df['Bearish_OB_High'] > 0)
+        ).astype(int)
+        df['SMC_Breaker_Bearish'] = (
+            (close < df['Bullish_OB_Low']) & 
+            (close.shift(1) >= df['Bullish_OB_Low']) &
+            (df['Bullish_OB_Low'] > 0)
+        ).astype(int)
+        
+    if config.get("premium_discount"):
+        equilibrium = 0.5 * (df['Last_Swing_High'] + df['Last_Swing_Low'])
+        df['SMC_Premium_Discount'] = np.where(close > equilibrium, 1, np.where(close < equilibrium, -1, 0))
+        
+    return df
 
 def engineer_features(input_path: str, output_path: str = None) -> str:
     """
@@ -370,6 +463,21 @@ def engineer_features(input_path: str, output_path: str = None) -> str:
     
     # 8. Elliott Wave Count
     df['Elliott_Wave'] = compute_elliott_waves(df, w=5)
+    
+    # 9. PDF Strategy Guide Features
+    try:
+        from pdf_feature_extractor import get_pdf_features_config
+        pdf_config = get_pdf_features_config()
+    except Exception as e:
+        print(f"Error loading PDF config: {e}. Enabling all features as fallback.")
+        pdf_config = {
+            "hammer": True, "inverted_hammer": True, "shooting_star": True, "doji": True,
+            "bullish_engulfing": True, "bearish_engulfing": True, "marubozu": True,
+            "double_top": True, "double_bottom": True, "channels": True,
+            "bos_choch": True, "order_blocks": True, "mitigation_blocks": True,
+            "premium_discount": True, "fvg": True, "liquidity_sweeps": True
+        }
+    df = compute_pdf_patterns(df, pdf_config)
     
     # Drop rows with NaNs resulting from shifts and rolling windows
     # Keep historical rows where possible, but MAs like SMA_200 will have NaNs for the first 200 rows.

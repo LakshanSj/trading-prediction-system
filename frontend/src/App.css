@@ -2279,6 +2279,396 @@ body {
   transition: right 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* ── User Authentication Modal ── */
+.user-auth-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(6, 9, 15, 0.75);
+  backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeInOverlay 0.2s ease-out;
+}
 
+.user-auth-modal {
+  width: 440px;
+  max-width: 90vw;
+  background: linear-gradient(135deg, rgba(19, 23, 34, 0.95) 0%, rgba(28, 35, 52, 0.95) 100%);
+  border: 1px solid rgba(0, 242, 254, 0.2);
+  border-radius: 16px;
+  padding: 36px;
+  box-shadow: 0 0 50px rgba(0, 242, 254, 0.1), 0 20px 40px rgba(0, 0, 0, 0.5);
+  position: relative;
+  animation: slideUpModal 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  color: #ffffff;
+}
 
+.auth-close-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: none;
+  border: none;
+  color: #8a909d;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.auth-close-btn:hover {
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.auth-header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.auth-header h2 {
+  font-size: 22px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  background: linear-gradient(90deg, #00f2fe 0%, #4facfe 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.auth-header p {
+  font-size: 13px;
+  color: #8a909d;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.auth-db-badge {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 20px;
+}
+
+.auth-db-badge.mock {
+  background-color: rgba(0, 230, 118, 0.12);
+  color: #00e676;
+  border: 1px solid rgba(0, 230, 118, 0.2);
+}
+
+.auth-db-badge.live {
+  background-color: rgba(255, 145, 0, 0.12);
+  color: #ff9100;
+  border: 1px solid rgba(255, 145, 0, 0.2);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.auth-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.auth-input-group label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #8a909d;
+}
+
+.auth-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.auth-input-wrapper .input-icon {
+  position: absolute;
+  left: 12px;
+  color: #8a909d;
+  pointer-events: none;
+}
+
+.auth-input-wrapper input {
+  width: 100%;
+  padding: 10px 12px 10px 38px;
+  background-color: #131722;
+  border: 1px solid #2a2e39;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.auth-input-wrapper input:focus {
+  outline: none;
+  border-color: #00f2fe;
+  box-shadow: 0 0 8px rgba(0, 242, 254, 0.25);
+  background-color: #161c28;
+}
+
+.forgot-password-link {
+  text-align: right;
+  margin-top: -6px;
+}
+
+.text-link-btn {
+  background: none;
+  border: none;
+  color: #8a909d;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.2s;
+}
+
+.text-link-btn:hover {
+  color: #00f2fe;
+  text-decoration: underline;
+}
+
+.text-link-btn.highlight {
+  color: #00f2fe;
+  font-weight: 500;
+}
+
+.text-link-btn.highlight:hover {
+  color: #4facfe;
+}
+
+.auth-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.auth-alert.error {
+  background-color: rgba(242, 54, 69, 0.1);
+  color: #ff5252;
+  border: 1px solid rgba(242, 54, 69, 0.2);
+}
+
+.auth-alert.success {
+  background-color: rgba(8, 153, 129, 0.1);
+  color: #00e676;
+  border: 1px solid rgba(8, 153, 129, 0.2);
+}
+
+.auth-submit-btn {
+  background: linear-gradient(90deg, #00f2fe 0%, #4facfe 100%);
+  border: none;
+  border-radius: 8px;
+  color: #000000;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s;
+  margin-top: 6px;
+}
+
+.auth-submit-btn:hover:not(:disabled) {
+  opacity: 0.95;
+  box-shadow: 0 0 15px rgba(0, 242, 254, 0.4);
+}
+
+.auth-submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.auth-footer {
+  margin-top: 24px;
+  text-align: center;
+}
+
+.auth-footer p {
+  font-size: 13px;
+  color: #8a909d;
+  margin: 0;
+}
+
+/* ── Profile & Auth buttons in Header ── */
+.signin-btn {
+  background: transparent;
+  border: 1px solid rgba(0, 242, 254, 0.4);
+  color: #00f2fe;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.signin-btn:hover {
+  background-color: rgba(0, 242, 254, 0.1);
+  box-shadow: 0 0 10px rgba(0, 242, 254, 0.2);
+  border-color: #00f2fe;
+}
+
+.user-profile-menu {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background-color: #131722;
+  padding: 4px 6px 4px 12px;
+  border-radius: 8px;
+  border: 1px solid #2a2e39;
+}
+
+.user-email-display {
+  font-size: 13px;
+  color: #ffffff;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.admin-pill {
+  background-color: #ffd600;
+  color: #000000;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.signout-btn {
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid #2a2e39;
+  color: #8a909d;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.signout-btn:hover {
+  background-color: rgba(242, 54, 69, 0.1);
+  color: #ff5252;
+  border-color: rgba(242, 54, 69, 0.3);
+}
+
+/* ── Event badges in User Activity Logs table ── */
+.event-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.badge-user_login {
+  background-color: rgba(0, 230, 118, 0.1);
+  color: #00e676;
+  border: 1px solid rgba(0, 230, 118, 0.2);
+}
+
+.badge-user_logout {
+  background-color: rgba(242, 54, 69, 0.1);
+  color: #ff5252;
+  border: 1px solid rgba(242, 54, 69, 0.2);
+}
+
+.badge-asset_search {
+  background-color: rgba(0, 242, 254, 0.1);
+  color: #00f2fe;
+  border: 1px solid rgba(0, 242, 254, 0.2);
+}
+
+.badge-model_training_triggered {
+  background-color: rgba(167, 139, 250, 0.1);
+  color: #a78bfa;
+  border: 1px solid rgba(167, 139, 250, 0.2);
+}
+
+.badge-validation_run_triggered {
+  background-color: rgba(255, 145, 0, 0.1);
+  color: #ff9100;
+  border: 1px solid rgba(255, 145, 0, 0.2);
+}
+
+.badge-monitor_run_triggered {
+  background-color: rgba(255, 214, 0, 0.1);
+  color: #ffd600;
+  border: 1px solid rgba(255, 214, 0, 0.2);
+}
+
+/* ── Full-page login/register gateway page ── */
+.user-auth-gateway {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  width: 100vw;
+  background: radial-gradient(circle at center, #0e1322 0%, #060911 100%);
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 10000;
+  overflow: hidden;
+}
+
+.user-auth-gateway::before {
+  content: '';
+  position: absolute;
+  width: 700px;
+  height: 700px;
+  background: radial-gradient(circle, rgba(0, 242, 254, 0.07) 0%, rgba(0, 0, 0, 0) 70%);
+  top: -15%;
+  left: -10%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.user-auth-gateway::after {
+  content: '';
+  position: absolute;
+  width: 750px;
+  height: 750px;
+  background: radial-gradient(circle, rgba(79, 172, 254, 0.06) 0%, rgba(0, 0, 0, 0) 70%);
+  bottom: -15%;
+  right: -10%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.user-auth-card {
+  width: 440px;
+  max-width: 90vw;
+  background: linear-gradient(135deg, rgba(17, 22, 34, 0.85) 0%, rgba(26, 32, 49, 0.85) 100%);
+  border: 1px solid rgba(0, 242, 254, 0.22);
+  border-radius: 16px;
+  padding: 40px;
+  box-shadow: 0 0 50px rgba(0, 242, 254, 0.12), 0 20px 45px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(16px);
+  z-index: 5;
+  animation: slideUpModal 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  color: #ffffff;
+  position: relative;
+}
 

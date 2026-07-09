@@ -150,6 +150,17 @@ def train_pipeline(feature_path: str, ticker: str, interval: str = "1d", arima_o
         'Elliott_Wave'
     ]
     
+    # Dynamically append PDF strategy patterns if present
+    pdf_features = [
+        'CDL_Hammer', 'CDL_Inverted_Hammer', 'CDL_Shooting_Star', 'CDL_Doji',
+        'CDL_Bullish_Engulfing', 'CDL_Bearish_Engulfing', 'CDL_Marubozu',
+        'Pattern_Double_Top', 'Pattern_Double_Bottom',
+        'SMC_Breaker_Bullish', 'SMC_Breaker_Bearish', 'SMC_Premium_Discount'
+    ]
+    for pf in pdf_features:
+        if pf in df.columns:
+            feature_cols.append(pf)
+    
     train_df_lgb = df_lgb.iloc[:split_idx - 1]
     
     X_train_lgb = train_df_lgb[feature_cols]
