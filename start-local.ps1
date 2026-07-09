@@ -1,11 +1,11 @@
-# AI Stock Prediction System — Local Launcher Script
-# Usage: Right-click → Run with PowerShell  OR  .\start-local.ps1
+# AI Stock Prediction System - Local Launcher Script
+# Usage: Right-click -> Run with PowerShell  OR  .\start-local.ps1
 
 $ErrorActionPreference = "Stop"
 
 Write-Host ""
 Write-Host "==================================================" -ForegroundColor Cyan
-Write-Host "      AI Stock Prediction — Local Launcher        " -ForegroundColor Cyan
+Write-Host "      AI Stock Prediction - Local Launcher        " -ForegroundColor Cyan
 Write-Host "==================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -43,25 +43,17 @@ if (-Not (Test-Path ".\frontend\node_modules")) {
 
 # 3. Start FastAPI backend on port 8000 in a new window
 Write-Host "[1/2] Launching FastAPI backend on http://localhost:8000..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList @(
-    "-NoExit",
-    "-Command",
-    "Write-Host '--- FastAPI Backend API ---' -ForegroundColor Green; .\.venv\Scripts\python.exe -m uvicorn src.api.main:app --port 8000 --reload"
-)
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "Write-Host '--- FastAPI Backend API ---' -ForegroundColor Green; .\.venv\Scripts\python.exe -m uvicorn src.api.main:app --port 8000 --reload"
 
 # 4. Start React Vite frontend in a new window
 Write-Host "[2/2] Launching React frontend on http://localhost:5173..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList @(
-    "-NoExit",
-    "-Command",
-    "Write-Host '--- React Vite Frontend ---' -ForegroundColor Green; cd frontend; npm run dev"
-)
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "Write-Host '--- React Vite Frontend ---' -ForegroundColor Green; cd frontend; npm run dev"
 
 Write-Host ""
 Write-Host "==================================================" -ForegroundColor Green
 Write-Host "  Dashboard URL: http://localhost:5173            " -ForegroundColor Green
 Write-Host "  Backend docs:  http://localhost:8000/docs       " -ForegroundColor Green
 Write-Host "==================================================" -ForegroundColor Green
-Write-Host "Both processes are running in the background." -ForegroundColor Gray
+Write-Host "Both processes are running in separate background windows." -ForegroundColor Gray
 Write-Host "To stop them, simply close the opened PowerShell windows." -ForegroundColor Gray
 Write-Host ""
