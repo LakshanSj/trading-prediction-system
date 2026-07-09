@@ -12,34 +12,44 @@ def fetch_data(ticker: str, start_date: str, end_date: str, output_dir: str = "d
     
     # Standardize interval strings
     interval_map = {
-        "5min": "5m",
-        "30min": "30m",
         "1w": "1wk",
         "1wk": "1wk",
-        "5m": "5m",
-        "30m": "30m",
-        "1h": "1h",
-        "3h": "3h",
-        "12h": "12h",
         "1d": "1d",
-        "3d": "3d"
+        "4h": "4h",
+        "1h": "1h"
     }
     interval = interval_map.get(interval.lower(), "1d")
     
-    # Calculate limits for intraday data
+    # Enforce strict historical range limits to optimize training speed and prevent OOM
     now = datetime.now()
-    if interval in ["5m", "30m"]:
-        max_start = now - timedelta(days=58)
+    if interval == "1h":
+        # Hourly data capped at 1 year (365 days)
+        max_start = now - timedelta(days=365)
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         if start_dt < max_start:
             start_date = max_start.strftime("%Y-%m-%d")
-            print(f"Adjusted start_date to {start_date} due to 60-day limit for {interval} interval.")
-    elif interval in ["1h", "3h", "12h"]:
+            print(f"Adjusted start_date to {start_date} due to 1-year limit for hourly interval.")
+    elif interval == "4h":
+        # 4-hourly data capped at 2 years (728 days) — maximum hourly range allowed by yfinance
         max_start = now - timedelta(days=728)
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         if start_dt < max_start:
             start_date = max_start.strftime("%Y-%m-%d")
-            print(f"Adjusted start_date to {start_date} due to 730-day limit for hourly interval.")
+            print(f"Adjusted start_date to {start_date} due to 730-day limit for 4h (hourly resampled) interval.")
+    elif interval == "1d":
+        # Daily data capped at 5 years
+        max_start = now - timedelta(days=5 * 365)
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        if start_dt < max_start:
+            start_date = max_start.strftime("%Y-%m-%d")
+            print(f"Adjusted start_date to {start_date} due to 5-year limit for daily interval.")
+    elif interval == "1wk":
+        # Weekly data capped at 10 years
+        max_start = now - timedelta(days=10 * 365)
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        if start_dt < max_start:
+            start_date = max_start.strftime("%Y-%m-%d")
+            print(f"Adjusted start_date to {start_date} due to 10-year limit for weekly interval.")
             
     print(f"Fetching data for ticker '{ticker}' ({interval}) from {start_date} to {end_date}...")
     
@@ -49,15 +59,9 @@ def fetch_data(ticker: str, start_date: str, end_date: str, output_dir: str = "d
     # Resolve yfinance interval and resampling rules
     yf_interval = interval
     resample_rule = None
-    if interval == "3h":
+    if interval == "4h":
         yf_interval = "1h"
-        resample_rule = "3h"
-    elif interval == "12h":
-        yf_interval = "1h"
-        resample_rule = "12h"
-    elif interval == "3d":
-        yf_interval = "1d"
-        resample_rule = "3D"
+        resample_rule = "4h"
     elif interval == "1wk":
         yf_interval = "1wk"
         

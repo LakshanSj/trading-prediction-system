@@ -69,6 +69,27 @@ function App() {
   const [chartZoom, setChartZoom] = useState('all');
   const [customZoomStart, setCustomZoomStart] = useState('');
   const [customZoomEnd, setCustomZoomEnd] = useState('');
+
+  // Enforce strict historical range limits per interval to optimize local training speed and prevent yfinance errors
+  const getMinAllowedDate = (interval) => {
+    const today = new Date();
+    let yearsBack = 5; // Default is 5 years
+    if (interval === '1h') yearsBack = 1;
+    else if (interval === '4h') yearsBack = 2; // Intraday Hourly cap is 730 days on yfinance
+    else if (interval === '1w') yearsBack = 10;
+    
+    const minDate = new Date();
+    minDate.setFullYear(today.getFullYear() - yearsBack);
+    return minDate;
+  };
+
+  const handleIntervalChange = (newInterval) => {
+    setIntervalVal(newInterval);
+    const minDateStr = getMinAllowedDate(newInterval).toISOString().split('T')[0];
+    
+    // Automatically set default date back to the limit of the new interval
+    setStartDate(minDateStr);
+  };
   
   // Suggestions & history states
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -594,7 +615,15 @@ function App() {
                 <input 
                   type="date" 
                   value={startDate} 
-                  onChange={(e) => setStartDate(e.target.value)}
+                  min={getMinAllowedDate(intervalVal).toISOString().split('T')[0]}
+                  onChange={(e) => {
+                    const minDateStr = getMinAllowedDate(intervalVal).toISOString().split('T')[0];
+                    if (e.target.value < minDateStr) {
+                      setStartDate(minDateStr);
+                    } else {
+                      setStartDate(e.target.value);
+                    }
+                  }}
                   disabled={trainLoading}
                 />
                 <input 
@@ -610,18 +639,14 @@ function App() {
               <label>Data Interval / Timeframe</label>
               <select 
                 value={intervalVal} 
-                onChange={(e) => setIntervalVal(e.target.value)}
+                onChange={(e) => handleIntervalChange(e.target.value)}
                 disabled={trainLoading}
                 className="interval-select"
               >
-                <option value="5m">5 Minutes</option>
-                <option value="30m">30 Minutes</option>
                 <option value="1h">1 Hour</option>
-                <option value="3h">3 Hours</option>
-                <option value="12h">12 Hours</option>
+                <option value="4h">4 Hours</option>
                 <option value="1d">1 Day (Daily)</option>
-                <option value="3d">3 Days</option>
-                <option value="1wk">1 Week (Weekly)</option>
+                <option value="1w">1 Week (Weekly)</option>
               </select>
             </div>
 

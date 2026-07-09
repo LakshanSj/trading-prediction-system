@@ -86,27 +86,26 @@ def run_monitoring(ticker: str, interval: str = "1d", alert_threshold=0.50, min_
     
     # Standardize interval strings for download limits
     interval_map = {
-        "5min": "5m", "30min": "30m", "1w": "1wk", "1wk": "1wk",
-        "5m": "5m", "30m": "30m", "1h": "1h", "3h": "3h",
-        "12h": "12h", "1d": "1d", "3d": "3d"
+        "1w": "1wk", "1wk": "1wk",
+        "1d": "1d",
+        "4h": "4h",
+        "1h": "1h"
     }
     std_interval = interval_map.get(interval_lower, "1d")
     
     # Configure start_date limits
-    if std_interval in ["5m", "30m"]:
-        start_date = (today - timedelta(days=10)).strftime("%Y-%m-%d")
-        yf_interval = std_interval
-    elif std_interval in ["1h", "3h", "12h"]:
+    if std_interval == "1h":
         start_date = (today - timedelta(days=45)).strftime("%Y-%m-%d")
         yf_interval = "1h"
-    elif std_interval == "3d":
-        start_date = (today - timedelta(days=180)).strftime("%Y-%m-%d")
-        yf_interval = "1d"
-    elif std_interval in ["1wk"]:
+    elif std_interval == "4h":
+        start_date = (today - timedelta(days=90)).strftime("%Y-%m-%d")
+        yf_interval = "1h"
+    elif std_interval == "1wk":
         start_date = (today - timedelta(days=365)).strftime("%Y-%m-%d")
         yf_interval = "1wk"
     else:
-        start_date = (today - timedelta(days=45)).strftime("%Y-%m-%d")
+        # Default is 1d
+        start_date = (today - timedelta(days=180)).strftime("%Y-%m-%d")
         yf_interval = "1d"
         
     end_date = (today + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -127,14 +126,10 @@ def run_monitoring(ticker: str, interval: str = "1d", alert_threshold=0.50, min_
     df_raw['Date'] = pd.to_datetime(df_raw['Date'])
     df_raw = df_raw.sort_values('Date').reset_index(drop=True)
     
-    # Apply resampling for custom intervals (3h, 12h, 3d)
+    # Apply resampling for custom intervals (4h)
     resample_rule = None
-    if std_interval == "3h":
-        resample_rule = "3h"
-    elif std_interval == "12h":
-        resample_rule = "12h"
-    elif std_interval == "3d":
-        resample_rule = "3D"
+    if std_interval == "4h":
+        resample_rule = "4h"
         
     if resample_rule:
         df_raw = df_raw.set_index('Date')
