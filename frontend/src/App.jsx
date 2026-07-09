@@ -15,7 +15,8 @@ import {
   HelpCircle,
   ShieldAlert,
   ArrowRight,
-  History
+  History,
+  Shield
 } from 'lucide-react';
 import { 
   LineChart, 
@@ -31,9 +32,10 @@ import {
   ReferenceLine,
   Cell
 } from 'recharts';
+import AdminPanel from './AdminPanel';
 import './App.css';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 // Global suggestions list for popular Stock & Crypto tokens
 const SUGGESTIONS = [
@@ -82,6 +84,7 @@ function App() {
   // Navigation & UI states
   const [activeTab, setActiveTab] = useState('predictions');
   const [backendStatus, setBackendStatus] = useState('checking');
+  const [showAdmin, setShowAdmin] = useState(false);
   
   // Data states
   const [tickerStatus, setTickerStatus] = useState(null); // {status, meta}
@@ -110,7 +113,9 @@ function App() {
   useEffect(() => {
     const checkConnection = async () => {
       try {
-        const res = await apiFetch(`${API_BASE_URL}/`);
+        // Use /health which is proxied to the backend in dev, or absolute URL in prod
+        const healthUrl = API_BASE_URL ? `${API_BASE_URL}/health` : '/health';
+        const res = await apiFetch(healthUrl);
         if (res.ok) {
           setBackendStatus('connected');
         } else {
@@ -465,14 +470,24 @@ function App() {
           </div>
         </div>
         
-        {/* Status Indicator */}
-        <div className="header-status">
+        {/* Header right: status + admin button */}
+        <div className="header-right">
           <div className={`status-badge ${backendStatus}`}>
             <span className="pulse-dot"></span>
             Backend: {backendStatus.toUpperCase()}
           </div>
+          <button
+            className="admin-trigger-btn"
+            onClick={() => setShowAdmin(true)}
+            title="Open Admin Logging Panel"
+          >
+            <Shield size={14} /> Admin
+          </button>
         </div>
       </header>
+
+      {/* Admin Panel overlay */}
+      {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
 
       <div className="main-layout">
         {/* SIDEBAR CONFIGURATION */}

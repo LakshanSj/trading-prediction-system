@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import lightgbm as lgb
 from datetime import datetime, timedelta
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -24,16 +24,23 @@ from train_model import train_pipeline, ResidualLSTM
 from walk_forward import run_wfv
 from monitor import run_monitoring
 
+# Import admin logger & router
+from admin_logger import write_log, EventType
+from admin import router as admin_router
+
 app = FastAPI(title="AI Stock Trend Prediction API", version="1.0.0")
 
 # Enable CORS for frontend connection
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In development, allow Vite's dev server port
-    allow_credentials=True,
+    allow_origins=["*"],  # Allow all origins (credentials must be False when using wildcard)
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register admin router (prefix: /admin)
+app.include_router(admin_router)
 
 # Shared memory/state to track active training runs
 training_status = {}
@@ -85,28 +92,40 @@ def run_train_task(ticker: str, start_date: str, end_date: str, epochs: int, int
     try:
         status_key = f"{ticker_upper}_{interval.upper()}"
         training_status[status_key] = {"status": "running", "message": "Fetching data from yfinance..."}
+        write_log(EventType.TRAIN_START, {"ticker": ticker_upper, "interval": interval,
+                                          "start_date": start_date, "end_date": end_date, "epochs": epochs})
+
         raw_path = fetch_data(ticker_upper, start_date, end_date, interval=interval)
-        
+
         training_status[status_key] = {"status": "running", "message": "Engineering technical features..."}
         features_path = engineer_features(raw_path)
-        
+
         training_status[status_key] = {"status": "running", "message": "Training hybrid models (ARIMA-LSTM & LightGBM)..."}
         meta_info = train_pipeline(features_path, ticker_upper, interval=interval, epochs=epochs)
-        
+
         training_status[status_key] = {
             "status": "trained",
             "message": f"Successfully trained model for {ticker_upper}!",
             "meta": meta_info
         }
+        write_log(EventType.TRAIN_COMPLETE, {"ticker": ticker_upper, "interval": interval,
+                                             "accuracy": meta_info.get("accuracy"),
+                                             "train_size": meta_info.get("train_size"),
+                                             "test_size": meta_info.get("test_size")})
     except Exception as e:
         status_key = f"{ticker_upper}_{interval.upper()}"
         training_status[status_key] = {"status": "failed", "message": str(e)}
+        write_log(EventType.TRAIN_FAILED, {"ticker": ticker_upper, "interval": interval, "error": str(e)}, success=False)
     finally:
         os.chdir(orig_cwd)
 
 @app.get("/")
 def read_root():
-    return {"status": "healthy", "service": "Trading Prediction Backend API"}
+    return {"status": "healthy", "service": "Trading Prediction Backend API", "version": "1.0.0"}
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy", "service": "Trading Prediction Backend API", "version": "1.0.0"}
 
 @app.get("/api/ticker-status")
 def get_ticker_status(ticker: str, interval: str = "1d"):
@@ -117,7 +136,8 @@ def get_ticker_status(ticker: str, interval: str = "1d"):
     if status_key in training_status:
         state = training_status[status_key]
         if state["status"] == "running":
-            return {"status": "running", "message": state["message"]}
+            # Return "training" status to match what the frontend polls for
+            return {"status": "training", "message": state["message"]}
         elif state["status"] == "failed":
             return {"status": "failed", "message": state["message"]}
         elif state["status"] == "trained":
@@ -361,7 +381,14 @@ def get_predictions(ticker: str, interval: str = "1d"):
         correct_dir = int((test_df['Actual_Dir'].iloc[1:] == test_df['Pred_Dir'].iloc[1:]).sum())
         total_dir = len(test_df) - 1
         accuracy = correct_dir / total_dir if total_dir > 0 else 0.0
-        
+
+        write_log(EventType.PREDICT_FETCH, {
+            "ticker": ticker_upper, "interval": interval,
+            "directional_accuracy": round(accuracy, 4),
+            "predicted_direction": predicted_direction_next,
+            "predicted_close": round(predicted_close_next, 2)
+        })
+
         return {
             "latest_close": last_close,
             "predicted_close_tomorrow": predicted_close_next,
@@ -423,7 +450,7 @@ def get_explainability(ticker: str, interval: str = "1d"):
             
         # Sort by absolute contribution strength
         contributions = sorted(contributions, key=lambda x: abs(x["contribution"]), reverse=True)
-        
+
         # Get basic feature importance split
         importance = lgb_model.feature_importance(importance_type='gain')
         importances = []
@@ -433,7 +460,10 @@ def get_explainability(ticker: str, interval: str = "1d"):
                 "importance": float(val)
             })
         importances = sorted(importances, key=lambda x: x["importance"], reverse=True)
-            
+
+        write_log(EventType.EXPLAIN_FETCH, {"ticker": ticker_upper, "interval": interval,
+                                            "top_feature": contributions[0]["feature"] if contributions else None})
+
         return {
             "contributions": contributions,
             "importances": importances,
@@ -477,7 +507,11 @@ def run_wfv_endpoint(req: WfvRequest):
         avg_accuracy = float(np.mean([r['accuracy'] for r in wfv_results])) if wfv_results else 0
         avg_sharpe = float(np.mean([r['sharpe'] for r in wfv_results])) if wfv_results else 0
         avg_max_dd = float(np.mean([r['max_dd'] for r in wfv_results])) if wfv_results else 0
-        
+
+        write_log(EventType.WFV_RUN, {"ticker": ticker_upper, "interval": req.interval,
+                                      "folds": len(formatted_results), "avg_accuracy": round(avg_accuracy, 4),
+                                      "avg_sharpe": round(avg_sharpe, 4)})
+
         return {
             "folds": formatted_results,
             "average_accuracy": avg_accuracy,
@@ -537,6 +571,13 @@ def run_monitoring_endpoint(ticker: str, interval: str = "1d"):
                 "correct": bool(row['Correct']) if not pd.isna(row['Correct']) else None
             })
             
+        write_log(EventType.MONITOR_RUN, {
+            "ticker": ticker_upper, "interval": interval,
+            "rolling_accuracy": round(rolling_acc, 4),
+            "decay_warning": decay_warning,
+            "evaluated_days": len(evaluated)
+        })
+
         return {
             "rolling_accuracy": rolling_acc,
             "total_evaluated_days": len(evaluated),

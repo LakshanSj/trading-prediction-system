@@ -50,7 +50,7 @@ def load_models(ticker: str, interval: str = "1d"):
         
     # Load PyTorch LSTM Model
     lstm_model = ResidualLSTM(input_size=1, hidden_size=64, num_layers=2, output_size=1)
-    lstm_model.load_state_dict(torch.load(lstm_path))
+    lstm_model.load_state_dict(torch.load(lstm_path, weights_only=True))
     lstm_model.eval()
     
     scaler = joblib.load(scaler_path)
