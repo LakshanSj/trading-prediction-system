@@ -885,7 +885,7 @@ function App() {
                             onClick={() => setShowMA(!showMA)} 
                             className={`overlay-btn ${showMA ? 'active' : ''}`}
                           >
-                            <Activity size={12} /> MAs Overlay
+                            <Activity size={12} /> WMA 144 / SMMA 5
                           </button>
                           <button 
                             onClick={() => setShowBB(!showBB)} 
@@ -936,13 +936,10 @@ function App() {
 
                               {/* MA overlays */}
                               {showMA && (
-                                <Line type="monotone" dataKey="sma_50" name="SMA 50" stroke="#ffb74d" dot={false} strokeWidth={1.5} />
+                                <Line type="monotone" dataKey="wma_144" name="WMA 144" stroke="#a78bfa" dot={false} strokeWidth={1.5} />
                               )}
                               {showMA && (
-                                <Line type="monotone" dataKey="sma_200" name="SMA 200" stroke="#e57373" dot={false} strokeWidth={1.5} />
-                              )}
-                              {showMA && (
-                                <Line type="monotone" dataKey="ema_20" name="EMA 20" stroke="#4fc3f7" dot={false} strokeWidth={1.2} strokeDasharray="3 3" />
+                                <Line type="monotone" dataKey="smma_5" name="SMMA 5" stroke="#ffd600" dot={false} strokeWidth={1.5} />
                               )}
 
                               {/* Bollinger Bands overlay */}

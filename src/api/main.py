@@ -320,6 +320,8 @@ def get_predictions(ticker: str, interval: str = "1d"):
                 "ema_20": float(row['EMA_20']) if 'EMA_20' in row else None,
                 "ema_50": float(row['EMA_50']) if 'EMA_50' in row else None,
                 "ema_200": float(row['EMA_200']) if 'EMA_200' in row else None,
+                "wma_144": float(row['WMA_144']) if 'WMA_144' in row and not pd.isna(row['WMA_144']) else None,
+                "smma_5": float(row['SMMA_5']) if 'SMMA_5' in row and not pd.isna(row['SMMA_5']) else None,
                 
                 # Bollinger Bands
                 "bb_upper": float(row['BB_Upper']) if 'BB_Upper' in row else None,

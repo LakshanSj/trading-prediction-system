@@ -265,6 +265,14 @@ def compute_elliott_waves(df: pd.DataFrame, w: int = 5) -> pd.Series:
                         
     return pd.Series(elliott_wave, index=df.index)
 
+def compute_wma(series, period=144):
+    weights = np.arange(1, period + 1)
+    sum_weights = weights.sum()
+    return series.rolling(period).apply(lambda w: np.dot(w, weights) / sum_weights, raw=True)
+
+def compute_smma(series, period=5):
+    return series.ewm(alpha=1 / period, adjust=False).mean()
+
 def engineer_features(input_path: str, output_path: str = None) -> str:
     """
     Loads raw stock data, engineers features, and saves the output.
@@ -304,6 +312,10 @@ def engineer_features(input_path: str, output_path: str = None) -> str:
     df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
     df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['Close'].ewm(span=200, adjust=False).mean()
+    
+    # Custom Overlay Moving Averages
+    df['WMA_144'] = compute_wma(df['Close'], 144)
+    df['SMMA_5'] = compute_smma(df['Close'], 5)
     
     # 5. Crossovers & Spread Features
     # Golden / Death Cross
