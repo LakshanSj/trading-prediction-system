@@ -18,13 +18,16 @@ import {
   History,
   Shield,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { 
   LineChart, 
   Line, 
   BarChart, 
   Bar, 
+  ComposedChart,
   XAxis, 
   YAxis, 
   CartesianGrid, 
@@ -409,6 +412,11 @@ function App() {
       chartData.push({
         date: item.date,
         close: item.close,
+        open: item.open || item.close,
+        high: item.high || item.close,
+        low: item.low || item.close,
+        body_range: [Math.min(item.open || item.close, item.close), Math.max(item.open || item.close, item.close)],
+        wick_range: [item.low || item.close, item.high || item.close],
         arima: null,
         hybrid: null,
         // Indicators
@@ -426,6 +434,7 @@ function App() {
         bb_lower: item.bb_lower,
         bb_mid: item.bb_mid,
         rsi_14: item.rsi_14,
+        rsi_ma: item.rsi_ma,
         stoch_k: item.stoch_k,
         stoch_d: item.stoch_d,
         cci_20: item.cci_20,
@@ -452,6 +461,11 @@ function App() {
       chartData.push({
         date: item.date,
         close: item.actual,
+        open: item.open || item.actual,
+        high: item.high || item.actual,
+        low: item.low || item.actual,
+        body_range: [Math.min(item.open || item.actual, item.actual), Math.max(item.open || item.actual, item.actual)],
+        wick_range: [item.low || item.actual, item.high || item.actual],
         arima: item.arima,
         hybrid: item.hybrid,
         // Indicators
@@ -469,6 +483,7 @@ function App() {
         bb_lower: item.bb_lower,
         bb_mid: item.bb_mid,
         rsi_14: item.rsi_14,
+        rsi_ma: item.rsi_ma,
         stoch_k: item.stoch_k,
         stoch_d: item.stoch_d,
         cci_20: item.cci_20,
@@ -520,6 +535,11 @@ function App() {
     
     return parsedDates.filter(d => d.parsedDate.getTime() >= filterStartMs);
   };
+  const chartPoints = getPredictionChartData();
+  const latestItem = chartPoints.length > 0 ? chartPoints[chartPoints.length - 1] : null;
+  const latestPrice = latestItem ? latestItem.close : 0;
+  const latestIsBullish = latestItem ? latestItem.close >= latestItem.open : true;
+  const latestPriceColor = latestIsBullish ? '#089981' : '#f23645';
 
   return (
     <div className="app-container">
@@ -961,27 +981,81 @@ function App() {
 
                         {/* Price Chart */}
                         <div className={`chart-wrapper ${isFullScreen ? 'fullscreen' : ''}`} style={isFullScreen ? { height: `${priceChartHeight}px` } : {}}>
-                          <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={getPredictionChartData()}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#2e333d" />
-                              <XAxis dataKey="date" stroke="#8a909d" />
-                              <YAxis stroke="#8a909d" domain={['auto', 'auto']} />
-                              <Tooltip 
-                                contentStyle={{ backgroundColor: '#1e222b', borderColor: '#2e333d', color: '#fff' }}
-                              />
-                              <Legend />
-                              
-                              {/* Standard lines */}
-                              <Line 
-                                type="monotone" 
-                                dataKey="close" 
-                                name="Actual Close" 
-                                stroke="#00e676" 
-                                dot={false}
-                                strokeWidth={2}
-                              />
+                          {/* TradingView-Style Left Header Overlays */}
+                          <div className="tv-chart-legend">
+                            <div className="tv-legend-ticker-row">
+                              <span className="tv-legend-symbol">{ticker.toUpperCase()} / USD</span>
+                              <span className="tv-legend-interval">{intervalVal}</span>
+                              <span className="tv-legend-exchange">BINANCE</span>
+                              <span className="tv-legend-ohlc">
+                                O<span style={{ color: latestIsBullish ? '#089981' : '#f23645' }}>{latestItem?.open?.toFixed(2) || '0.00'}</span>{' '}
+                                H<span style={{ color: latestIsBullish ? '#089981' : '#f23645' }}>{latestItem?.high?.toFixed(2) || '0.00'}</span>{' '}
+                                L<span style={{ color: latestIsBullish ? '#089981' : '#f23645' }}>{latestItem?.low?.toFixed(2) || '0.00'}</span>{' '}
+                                C<span style={{ color: latestIsBullish ? '#089981' : '#f23645' }}>{latestItem?.close?.toFixed(2) || '0.00'}</span>
+                              </span>
+                            </div>
+                            
+                            <div className="tv-legend-indicators">
+                              <div className="tv-indicator-item">
+                                <button onClick={() => setShowMA(!showMA)} className="tv-eye-btn" title="Toggle WMA 144">
+                                  {showMA ? <Eye size={11} /> : <EyeOff size={11} />}
+                                </button>
+                                <span className="tv-indicator-name" style={{ color: '#a78bfa' }}>WMA 144 close</span>
+                                <span className="tv-indicator-value">{latestItem?.wma_144 ? latestItem.wma_144.toFixed(2) : 'n/a'}</span>
+                              </div>
+                              <div className="tv-indicator-item">
+                                <button onClick={() => setShowMA(!showMA)} className="tv-eye-btn" title="Toggle SMMA 5">
+                                  {showMA ? <Eye size={11} /> : <EyeOff size={11} />}
+                                </button>
+                                <span className="tv-indicator-name" style={{ color: '#ffd600' }}>SMMA 5 close</span>
+                                <span className="tv-indicator-value">{latestItem?.smma_5 ? latestItem.smma_5.toFixed(2) : 'n/a'}</span>
+                              </div>
+                            </div>
 
-                              {/* MA overlays */}
+                            {/* BUY/SELL quick labels */}
+                            <div className="tv-quick-trade-box">
+                              <div className="tv-trade-pill sell-pill">
+                                <span className="tv-pill-label">SELL</span>
+                                <span className="tv-pill-price">{(latestPrice - 0.01).toFixed(2)}</span>
+                              </div>
+                              <div className="tv-pill-spread">0.01</div>
+                              <div className="tv-trade-pill buy-pill">
+                                <span className="tv-pill-price">{latestPrice.toFixed(2)}</span>
+                                <span className="tv-pill-label">BUY</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={getPredictionChartData()}>
+                              <CartesianGrid strokeDasharray="1 1" stroke="#222632" />
+                              <XAxis dataKey="date" stroke="#8a909d" />
+                              <YAxis stroke="#8a909d" domain={['auto', 'auto']} orientation="right" />
+                              <Tooltip 
+                                contentStyle={{ backgroundColor: '#131722', borderColor: '#2a2e39', color: '#fff' }}
+                              />
+                              
+                              {/* Wick range (high to low) rendered as thin bar */}
+                              <Bar dataKey="wick_range" barSize={1.5} name="Wick" tooltipType="none">
+                                {
+                                  getPredictionChartData().map((entry, index) => {
+                                    const isUp = entry.close >= entry.open;
+                                    return <Cell key={`wick-${index}`} fill={isUp ? '#089981' : '#f23645'} stroke={isUp ? '#089981' : '#f23645'} />;
+                                  })
+                                }
+                              </Bar>
+
+                              {/* Body range (open to close) rendered as thicker bar */}
+                              <Bar dataKey="body_range" barSize={8} name="Candle">
+                                {
+                                  getPredictionChartData().map((entry, index) => {
+                                    const isUp = entry.close >= entry.open;
+                                    return <Cell key={`body-${index}`} fill={isUp ? '#089981' : '#f23645'} stroke={isUp ? '#089981' : '#f23645'} />;
+                                  })
+                                }
+                              </Bar>
+
+                              {/* MAs overlay */}
                               {showMA && (
                                 <Line type="monotone" dataKey="wma_144" name="WMA 144" stroke="#a78bfa" dot={false} strokeWidth={1.5} />
                               )}
@@ -1010,10 +1084,27 @@ function App() {
                               {showOB && (
                                 <Line type="step" dataKey="bearish_ob_low" name="Bear OB Low" stroke="#f44336" dot={false} strokeWidth={1.0} opacity={0.4} />
                               )}
+
+                              {/* Dynamic Axis Tag Highlight for latest Close Price */}
+                              {latestItem && (
+                                <ReferenceLine 
+                                  y={latestPrice} 
+                                  stroke={latestPriceColor} 
+                                  strokeDasharray="2 2"
+                                  label={{ 
+                                    value: latestPrice.toFixed(2), 
+                                    position: 'right', 
+                                    fill: '#fff', 
+                                    backgroundColor: latestPriceColor, 
+                                    fontSize: 10,
+                                    fontWeight: 'bold'
+                                  }} 
+                                />
+                              )}
                               
                               {/* Horizontal scroll slider */}
                               <Brush dataKey="date" height={15} stroke="rgba(0, 242, 254, 0.4)" fill="#0d111a" tickFormatter={() => ''} />
-                            </LineChart>
+                            </ComposedChart>
                           </ResponsiveContainer>
                         </div>
 
@@ -1043,16 +1134,47 @@ function App() {
                           </div>
 
                           <div className="oscillator-chart-wrapper">
+                            {oscillatorTab === 'rsi' && (
+                              <div className="tv-osc-legend">
+                                <span className="tv-legend-symbol">RSI 14</span>
+                                <span className="tv-legend-source">close</span>
+                                <span style={{ color: '#a78bfa', fontWeight: 'bold' }}>{latestItem?.rsi_14 ? latestItem.rsi_14.toFixed(2) : 'n/a'}</span>
+                                <span style={{ color: '#ffd600', fontWeight: 'bold' }}>{latestItem?.rsi_ma ? latestItem.rsi_ma.toFixed(2) : 'n/a'}</span>
+                              </div>
+                            )}
                             <ResponsiveContainer width="100%" height="100%">
                               {oscillatorTab === 'rsi' ? (
                                 <LineChart data={getPredictionChartData()}>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="#2e333d" />
+                                  <CartesianGrid strokeDasharray="1 1" stroke="#222632" />
                                   <XAxis dataKey="date" stroke="#8a909d" />
-                                  <YAxis stroke="#8a909d" domain={[0, 100]} ticks={[30, 70]} />
-                                  <Tooltip contentStyle={{ backgroundColor: '#1e222b', borderColor: '#2e333d', color: '#fff' }} />
-                                  <ReferenceLine y={70} stroke="#ff1744" strokeDasharray="3 3" />
-                                  <ReferenceLine y={30} stroke="#00e676" strokeDasharray="3 3" />
+                                  <YAxis stroke="#8a909d" domain={[0, 100]} ticks={[30, 50, 70]} orientation="right" />
+                                  <Tooltip contentStyle={{ backgroundColor: '#131722', borderColor: '#2a2e39', color: '#fff' }} />
+                                  <ReferenceLine y={70} stroke="rgba(239, 83, 80, 0.4)" strokeDasharray="3 3" />
+                                  <ReferenceLine y={50} stroke="rgba(138, 144, 157, 0.2)" strokeDasharray="3 3" />
+                                  <ReferenceLine y={30} stroke="rgba(8, 153, 129, 0.4)" strokeDasharray="3 3" />
+                                  
+                                  {/* RSI (purple) and RSI-MA (yellow) lines */}
                                   <Line type="monotone" dataKey="rsi_14" name="RSI" stroke="#a78bfa" dot={false} strokeWidth={1.5} />
+                                  <Line type="monotone" dataKey="rsi_ma" name="RSI-MA" stroke="#ffd600" dot={false} strokeWidth={1.5} />
+                                  
+                                  {/* Dynamic axis current labels */}
+                                  {latestItem?.rsi_14 && (
+                                    <ReferenceLine 
+                                      y={latestItem.rsi_14} 
+                                      stroke="#a78bfa" 
+                                      strokeDasharray="2 2"
+                                      label={{ value: latestItem.rsi_14.toFixed(2), position: 'right', fill: '#fff', backgroundColor: '#a78bfa', fontSize: 10 }}
+                                    />
+                                  )}
+                                  {latestItem?.rsi_ma && (
+                                    <ReferenceLine 
+                                      y={latestItem.rsi_ma} 
+                                      stroke="#ffd600" 
+                                      strokeDasharray="2 2"
+                                      label={{ value: latestItem.rsi_ma.toFixed(2), position: 'right', fill: '#000', backgroundColor: '#ffd600', fontSize: 10 }}
+                                    />
+                                  )}
+
                                   <Brush dataKey="date" height={15} stroke="rgba(0, 242, 254, 0.4)" fill="#0d111a" tickFormatter={() => ''} />
                                 </LineChart>
                               ) : oscillatorTab === 'stochastic' ? (

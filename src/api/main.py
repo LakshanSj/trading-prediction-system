@@ -242,11 +242,13 @@ def get_predictions(ticker: str, interval: str = "1d"):
         df = pd.read_csv(features_path)
         df['Date'] = pd.to_datetime(df['Date'])
         
-        # Legacy fallback: compute WMA 144 and SMMA 5 on the fly if missing from old saved feature CSVs
-        if 'WMA_144' not in df.columns or 'SMMA_5' not in df.columns:
+        # Legacy fallback: compute WMA 144, SMMA 5, and RSI_MA on the fly if missing from old saved feature CSVs
+        if 'WMA_144' not in df.columns or 'SMMA_5' not in df.columns or 'RSI_MA' not in df.columns:
             from feature_engineer import compute_wma, compute_smma
             df['WMA_144'] = compute_wma(df['Close'], 144)
             df['SMMA_5'] = compute_smma(df['Close'], 5)
+            if 'RSI_14' in df.columns:
+                df['RSI_MA'] = df['RSI_14'].rolling(window=14).mean()
         
         # Test predictions split (20% of data)
         split_idx = int(len(df) * 0.8)
@@ -338,6 +340,7 @@ def get_predictions(ticker: str, interval: str = "1d"):
                 
                 # Oscillators
                 "rsi_14": float(row['RSI_14']) if 'RSI_14' in row else None,
+                "rsi_ma": float(row['RSI_MA']) if 'RSI_MA' in row and not pd.isna(row['RSI_MA']) else None,
                 "stoch_k": float(row['Stoch_K']) if 'Stoch_K' in row else None,
                 "stoch_d": float(row['Stoch_D']) if 'Stoch_D' in row else None,
                 "cci_20": float(row['CCI_20']) if 'CCI_20' in row else None,

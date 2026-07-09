@@ -2044,3 +2044,184 @@ body {
   text-shadow: 0 0 5px rgba(0, 242, 254, 0.4) !important;
 }
 
+/* ── TradingView Chart Style Additions ── */
+.chart-wrapper {
+  position: relative !important;
+}
+
+.tv-chart-legend {
+  position: absolute !important;
+  top: 15px !important;
+  left: 20px !important;
+  z-index: 10 !important;
+  background-color: rgba(19, 23, 34, 0.85) !important;
+  backdrop-filter: blur(4px) !important;
+  padding: 8px 12px !important;
+  border-radius: 6px !important;
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 4px !important;
+  pointer-events: auto !important; /* Allow clicking legend elements */
+}
+
+.tv-legend-ticker-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  font-weight: bold !important;
+  flex-wrap: wrap !important;
+}
+
+.tv-legend-symbol {
+  color: var(--text-main) !important;
+  font-size: 11px !important;
+}
+
+.tv-legend-interval {
+  color: var(--accent-cyan) !important;
+  background: rgba(0, 242, 254, 0.1) !important;
+  padding: 1px 4px !important;
+  border-radius: 3px !important;
+  font-size: 9px !important;
+}
+
+.tv-legend-exchange {
+  color: var(--text-muted) !important;
+  font-size: 9px !important;
+}
+
+.tv-legend-ohlc {
+  color: var(--text-muted) !important;
+  font-size: 10px !important;
+  margin-left: 8px !important;
+}
+
+.tv-legend-ohlc span {
+  margin-left: 2px !important;
+  margin-right: 6px !important;
+  font-weight: 700 !important;
+}
+
+.tv-legend-indicators {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+  margin-top: 2px !important;
+}
+
+.tv-indicator-item {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  font-size: 10px !important;
+}
+
+.tv-eye-btn {
+  background: none !important;
+  border: none !important;
+  color: var(--text-muted) !important;
+  cursor: pointer !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.tv-eye-btn:hover {
+  color: var(--text-main) !important;
+}
+
+.tv-indicator-name {
+  font-weight: 600 !important;
+}
+
+.tv-indicator-value {
+  color: var(--text-main) !important;
+  font-weight: 600 !important;
+}
+
+/* BUY/SELL pills styling */
+.tv-quick-trade-box {
+  display: flex !important;
+  align-items: center !important;
+  gap: 1px !important;
+  margin-top: 6px !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 4px !important;
+  overflow: hidden !important;
+  width: fit-content !important;
+}
+
+.tv-trade-pill {
+  padding: 3px 8px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  font-size: 9.5px !important;
+  font-weight: 800 !important;
+  cursor: pointer !important;
+  user-select: none !important;
+}
+
+.tv-trade-pill.sell-pill {
+  background-color: #f23645 !important;
+  color: #fff !important;
+}
+
+.tv-trade-pill.sell-pill:hover {
+  filter: brightness(1.1) !important;
+}
+
+.tv-trade-pill.buy-pill {
+  background-color: #2962ff !important;
+  color: #fff !important;
+}
+
+.tv-trade-pill.buy-pill:hover {
+  filter: brightness(1.1) !important;
+}
+
+.tv-pill-spread {
+  background-color: #1c2030 !important;
+  color: var(--text-muted) !important;
+  font-size: 9px !important;
+  padding: 3px 6px !important;
+  font-weight: 600 !important;
+}
+
+.tv-pill-label {
+  opacity: 0.8 !important;
+}
+
+/* Floating legend for bottom oscillator */
+.oscillator-chart-wrapper {
+  position: relative !important;
+}
+
+.tv-osc-legend {
+  position: absolute !important;
+  top: 10px !important;
+  left: 20px !important;
+  z-index: 10 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  font-size: 10.5px !important;
+  background-color: rgba(19, 23, 34, 0.85) !important;
+  backdrop-filter: blur(2px) !important;
+  padding: 4px 8px !important;
+  border-radius: 4px !important;
+  border: 1px solid rgba(255, 255, 255, 0.03) !important;
+}
+
+.tv-osc-legend .tv-legend-symbol {
+  color: var(--text-muted) !important;
+}
+
+.tv-osc-legend .tv-legend-source {
+  color: rgba(255, 255, 255, 0.4) !important;
+  font-size: 9px !important;
+}
+
+

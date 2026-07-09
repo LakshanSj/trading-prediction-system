@@ -346,6 +346,7 @@ def engineer_features(input_path: str, output_path: str = None) -> str:
     
     # 6. Technical Indicators (RSI, MACD, Stochastic, CCI, Bollinger Bands)
     df['RSI_14'] = compute_rsi(df['Close'], period=14)
+    df['RSI_MA'] = df['RSI_14'].rolling(window=14).mean()
     
     macd_line, signal_line, macd_hist = compute_macd(df['Close'])
     df['MACD'] = macd_line
