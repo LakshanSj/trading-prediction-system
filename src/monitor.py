@@ -1,54 +1,33 @@
 import os
 import argparse
 import pickle
-import joblib
 import pandas as pd
 import numpy as np
 import yfinance as yf
-import torch
-import torch.nn as nn
+import lightgbm as lgb
 from datetime import datetime, timedelta
 
 # Import feature engineer
-from feature_engineer import engineer_features, compute_rsi, compute_macd
-
-from train_model import ResidualLSTM
+from feature_engineer import engineer_features
 
 def load_models(ticker: str, interval: str = "1d"):
-    """Loads all saved models, scalers, and meta parameters for a ticker."""
+    """Loads all saved LightGBM models and meta parameters for a ticker."""
     t = ticker.lower()
     i = interval.lower()
-    arima_path = f"models/arima_{t}_{i}.pkl"
-    lstm_path = f"models/lstm_{t}_{i}.pth"
-    lgb_path = f"models/lgb_{t}_{i}.txt"
-    scaler_path = f"models/scaler_{t}_{i}.pkl"
+    lgb_reg_path = f"models/lgb_reg_{t}_{i}.txt"
+    lgb_clf_path = f"models/lgb_clf_{t}_{i}.txt"
     meta_path = f"models/meta_{t}_{i}.pkl"
     
-    # Legacy daily fallback
-    if i == "1d" and not os.path.exists(arima_path):
-        arima_path = f"models/arima_{t}.pkl"
-        lstm_path = f"models/lstm_{t}.pth"
-        lgb_path = f"models/lgb_{t}.txt"
-        scaler_path = f"models/scaler_{t}.pkl"
-        meta_path = f"models/meta_{t}.pkl"
-        
-    if not (os.path.exists(arima_path) and os.path.exists(lstm_path) and os.path.exists(scaler_path) and os.path.exists(meta_path)):
+    if not (os.path.exists(lgb_reg_path) and os.path.exists(lgb_clf_path) and os.path.exists(meta_path)):
         raise FileNotFoundError(f"Trained models not found for ticker '{ticker}' at interval '{interval}'. Please train models first.")
         
-    with open(arima_path, 'rb') as f:
-        arima_result = pickle.load(f)
-        
-    # Load PyTorch LSTM Model
-    lstm_model = ResidualLSTM(input_size=1, hidden_size=64, num_layers=2, output_size=1)
-    lstm_model.load_state_dict(torch.load(lstm_path, weights_only=True))
-    lstm_model.eval()
-    
-    scaler = joblib.load(scaler_path)
+    lgb_reg = lgb.Booster(model_file=lgb_reg_path)
+    lgb_clf = lgb.Booster(model_file=lgb_clf_path)
     
     with open(meta_path, 'rb') as f:
         meta_info = pickle.load(f)
         
-    return arima_result, lstm_model, scaler, meta_info
+    return lgb_reg, lgb_clf, meta_info
 
 def run_monitoring(ticker: str, interval: str = "1d", alert_threshold=0.50, min_days=5):
     """
@@ -65,7 +44,7 @@ def run_monitoring(ticker: str, interval: str = "1d", alert_threshold=0.50, min_
     
     # Load models
     try:
-        arima_result, lstm_model, scaler, meta_info = load_models(ticker, interval)
+        lgb_reg, lgb_clf, meta_info = load_models(ticker, interval)
     except Exception as e:
         print(f"Error loading models: {e}")
         return
@@ -83,19 +62,19 @@ def run_monitoring(ticker: str, interval: str = "1d", alert_threshold=0.50, min_
     }
     std_interval = interval_map.get(interval_lower, "1d")
     
-    # Configure start_date limits
+    # Configure start_date limits to ensure at least 200+ bars exist after feature engineering drops NaNs
     if std_interval == "1h":
         start_date = (today - timedelta(days=45)).strftime("%Y-%m-%d")
         yf_interval = "1h"
     elif std_interval == "4h":
-        start_date = (today - timedelta(days=90)).strftime("%Y-%m-%d")
+        start_date = (today - timedelta(days=180)).strftime("%Y-%m-%d")
         yf_interval = "1h"
     elif std_interval == "1wk":
-        start_date = (today - timedelta(days=365)).strftime("%Y-%m-%d")
+        start_date = (today - timedelta(days=365 * 6)).strftime("%Y-%m-%d")
         yf_interval = "1wk"
     else:
-        # Default is 1d
-        start_date = (today - timedelta(days=180)).strftime("%Y-%m-%d")
+        # Default is 1d (need at least 200 trading days; 450 calendar days is ~310 trading days)
+        start_date = (today - timedelta(days=450)).strftime("%Y-%m-%d")
         yf_interval = "1d"
         
     end_date = (today + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -233,35 +212,17 @@ def run_monitoring(ticker: str, interval: str = "1d", alert_threshold=0.50, min_
         print(f"Prediction for next trading interval ({next_date_str}) already generated.")
     else:
         print(f"Generating prediction for next trading interval ({next_date_str})...")
-        # 1. ARIMA forecast & residuals:
-        try:
-            updated_arima = arima_result.apply(df_features['Close'].values)
-            arima_pred = updated_arima.forecast(steps=1)[0]
-            # Ensure seq_length matches or fits dataset length
-            seq_len = min(meta_info['seq_length'], len(df_features))
-            recent_residuals = (df_features['Close'].values - updated_arima.fittedvalues)[-seq_len:]
-        except Exception as e:
-            print(f"Warning: ARIMA apply failed: {e}. Using fallback residuals and standard forecast.")
-            arima_pred = arima_result.forecast(steps=1)[0]
-            seq_len = min(meta_info['seq_length'], len(df_features))
-            recent_residuals = (df_features['Close'].values - df_features['Close'].shift(1).bfill().values)[-seq_len:]
-            
-        scaled_residuals = scaler.transform(recent_residuals.reshape(-1, 1)).flatten()
         
-        # Format for PyTorch LSTM
-        X_lstm = torch.tensor(scaled_residuals.reshape((1, seq_len, 1)), dtype=torch.float32)
+        # Prepare feature vector for LightGBM models
+        feature_cols = meta_info['feature_cols']
+        latest_features = df_features[feature_cols].iloc[-1:]
         
-        # Predict LSTM residual
-        with torch.no_grad():
-            lstm_scaled_pred = lstm_model(X_lstm).item()
-        lstm_pred = scaler.inverse_transform([[lstm_scaled_pred]])[0][0]
+        # Predict Close Price using LightGBM Regressor
+        predicted_close = float(lgb_reg.predict(latest_features)[0])
         
-        # Hybrid prediction
-        predicted_close = arima_pred + lstm_pred
-        
-        # Compare with today's Close to get predicted direction
-        today_close = float(df_features.iloc[-1]['Close'])
-        predicted_direction = "Up" if predicted_close > today_close else "Down"
+        # Predict Direction using LightGBM Classifier
+        pred_dir_prob = float(lgb_clf.predict(latest_features)[0])
+        predicted_direction = "Up" if pred_dir_prob > 0.5 else "Down"
         
         # Append to monitor dataframe
         new_row = pd.DataFrame([{

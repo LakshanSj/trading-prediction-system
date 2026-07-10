@@ -437,6 +437,25 @@ def engineer_features(input_path: str, output_path: str = None) -> str:
     df['Resistance_Rejection_50'] = ((df['High'] >= df['SMA_50'] * 0.99) & (df['High'] <= df['SMA_50'] * 1.01) & (df['Close'] < df['Open']) & (df['Close'] < df['SMA_50'])).astype(int)
     df['Resistance_Rejection_200'] = ((df['High'] >= df['SMA_200'] * 0.99) & (df['High'] <= df['SMA_200'] * 1.01) & (df['Close'] < df['Open']) & (df['Close'] < df['SMA_200'])).astype(int)
     
+    # 5.5 Fibonacci Retracement Levels (Rolling 20 and 50 period windows)
+    for w in [20, 50]:
+        high_roll = df['High'].rolling(window=w).max()
+        low_roll = df['Low'].rolling(window=w).min()
+        fib_range = high_roll - low_roll + 1e-10
+        
+        df[f'Fib_236_{w}'] = high_roll - 0.236 * fib_range
+        df[f'Fib_382_{w}'] = high_roll - 0.382 * fib_range
+        df[f'Fib_500_{w}'] = high_roll - 0.500 * fib_range
+        df[f'Fib_618_{w}'] = high_roll - 0.618 * fib_range
+        df[f'Fib_786_{w}'] = high_roll - 0.786 * fib_range
+        
+        # Distance to levels
+        df[f'Dist_Fib_236_{w}'] = (df['Close'] - df[f'Fib_236_{w}']) / fib_range
+        df[f'Dist_Fib_382_{w}'] = (df['Close'] - df[f'Fib_382_{w}']) / fib_range
+        df[f'Dist_Fib_500_{w}'] = (df['Close'] - df[f'Fib_500_{w}']) / fib_range
+        df[f'Dist_Fib_618_{w}'] = (df['Close'] - df[f'Fib_618_{w}']) / fib_range
+        df[f'Dist_Fib_786_{w}'] = (df['Close'] - df[f'Fib_786_{w}']) / fib_range
+
     # 6. Technical Indicators (RSI, MACD, Stochastic, CCI, Bollinger Bands)
     df['RSI_14'] = compute_rsi(df['Close'], period=14)
     df['RSI_MA'] = df['RSI_14'].rolling(window=14).mean()

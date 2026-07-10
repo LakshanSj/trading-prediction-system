@@ -4,7 +4,6 @@ import pickle
 import joblib
 import pandas as pd
 import numpy as np
-import torch
 import lightgbm as lgb
 from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
@@ -22,7 +21,7 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 # Import from core components
 from data_fetcher import fetch_data
 from feature_engineer import engineer_features
-from train_model import train_pipeline, ResidualLSTM
+from train_model import train_pipeline
 from walk_forward import run_wfv
 from monitor import run_monitoring
 
@@ -91,26 +90,46 @@ def models_exist(ticker: str, interval: str = "1d") -> bool:
     interval = standardize_interval(interval)
     t = ticker.lower()
     i = interval.lower()
-    # Check new format with interval suffix
-    new_format = (
-        os.path.exists(os.path.join(PROJECT_ROOT, f"models/arima_{t}_{i}.pkl")) and
-        os.path.exists(os.path.join(PROJECT_ROOT, f"models/lstm_{t}_{i}.pth")) and
-        os.path.exists(os.path.join(PROJECT_ROOT, f"models/lgb_{t}_{i}.txt")) and
-        os.path.exists(os.path.join(PROJECT_ROOT, f"models/scaler_{t}_{i}.pkl")) and
+    return (
+        os.path.exists(os.path.join(PROJECT_ROOT, f"models/lgb_reg_{t}_{i}.txt")) and
+        os.path.exists(os.path.join(PROJECT_ROOT, f"models/lgb_clf_{t}_{i}.txt")) and
         os.path.exists(os.path.join(PROJECT_ROOT, f"models/meta_{t}_{i}.pkl"))
     )
-    if new_format:
-        return True
-    # Fallback to legacy files for daily data
-    if i == "1d":
-        return (
-            os.path.exists(os.path.join(PROJECT_ROOT, f"models/arima_{t}.pkl")) and
-            os.path.exists(os.path.join(PROJECT_ROOT, f"models/lstm_{t}.pth")) and
-            os.path.exists(os.path.join(PROJECT_ROOT, f"models/lgb_{t}.txt")) and
-            os.path.exists(os.path.join(PROJECT_ROOT, f"models/scaler_{t}.pkl")) and
-            os.path.exists(os.path.join(PROJECT_ROOT, f"models/meta_{t}.pkl"))
-        )
-    return False
+# In-memory LightGBM model cache: { "ticker_interval" -> { "mtime": float, "lgb_reg": Booster, "lgb_clf": Booster, "meta_info": dict } }
+_model_cache = {}
+
+def get_cached_models(ticker: str, interval: str = "1d"):
+    t = ticker.lower()
+    i = interval.lower()
+    cache_key = f"{t}_{i}"
+    
+    lgb_reg_path = os.path.join(PROJECT_ROOT, f"models/lgb_reg_{t}_{i}.txt")
+    lgb_clf_path = os.path.join(PROJECT_ROOT, f"models/lgb_clf_{t}_{i}.txt")
+    meta_path = os.path.join(PROJECT_ROOT, f"models/meta_{t}_{i}.pkl")
+    
+    if not (os.path.exists(lgb_reg_path) and os.path.exists(lgb_clf_path) and os.path.exists(meta_path)):
+        raise FileNotFoundError(f"Trained models not found for ticker '{ticker}' at interval '{interval}'. Please train models first.")
+        
+    mtime = os.path.getmtime(meta_path)
+    cached = _model_cache.get(cache_key)
+    
+    if cached and cached["mtime"] == mtime:
+        return cached["lgb_reg"], cached["lgb_clf"], cached["meta_info"]
+        
+    # Reload from disk
+    lgb_reg = lgb.Booster(model_file=lgb_reg_path)
+    lgb_clf = lgb.Booster(model_file=lgb_clf_path)
+    with open(meta_path, 'rb') as f:
+        meta_info = pickle.load(f)
+        
+    _model_cache[cache_key] = {
+        "mtime": mtime,
+        "lgb_reg": lgb_reg,
+        "lgb_clf": lgb_clf,
+        "meta_info": meta_info
+    }
+    return lgb_reg, lgb_clf, meta_info
+
 
 def run_train_task(ticker: str, start_date: str, end_date: str, epochs: int, interval: str = "1d"):
     interval = standardize_interval(interval)
@@ -129,8 +148,14 @@ def run_train_task(ticker: str, start_date: str, end_date: str, epochs: int, int
         training_status[status_key] = {"status": "running", "message": "Engineering technical features..."}
         features_path = engineer_features(raw_path)
 
-        training_status[status_key] = {"status": "running", "message": "Training hybrid models (ARIMA-LSTM & LightGBM)..."}
+        training_status[status_key] = {"status": "running", "message": "Training LightGBM Regressor & Classifier..."}
         meta_info = train_pipeline(features_path, ticker_upper, interval=interval, epochs=epochs)
+
+        # Run the daily monitoring tracking automatically to generate/update the daily prediction report
+        try:
+            run_monitoring(ticker_upper, interval)
+        except Exception as mon_err:
+            print(f"Error running automatic monitoring update: {mon_err}")
 
         training_status[status_key] = {
             "status": "trained",
@@ -238,100 +263,33 @@ def get_predictions(ticker: str, interval: str = "1d"):
         t = ticker_upper.lower()
         i = interval.lower()
         
-        # Load features, models, scaler, meta (all paths resolved from project root)
-        arima_path = os.path.join(PROJECT_ROOT, f"models/arima_{t}_{i}.pkl")
-        lstm_path = os.path.join(PROJECT_ROOT, f"models/lstm_{t}_{i}.pth")
-        scaler_path = os.path.join(PROJECT_ROOT, f"models/scaler_{t}_{i}.pkl")
-        meta_path = os.path.join(PROJECT_ROOT, f"models/meta_{t}_{i}.pkl")
-        
-        if i == "1d" and not os.path.exists(arima_path):
-            arima_path = os.path.join(PROJECT_ROOT, f"models/arima_{t}.pkl")
-            lstm_path = os.path.join(PROJECT_ROOT, f"models/lstm_{t}.pth")
-            scaler_path = os.path.join(PROJECT_ROOT, f"models/scaler_{t}.pkl")
-            meta_path = os.path.join(PROJECT_ROOT, f"models/meta_{t}.pkl")
-            
-        with open(arima_path, 'rb') as f:
-            arima_result = pickle.load(f)
-            
-        lstm_model = ResidualLSTM(input_size=1, hidden_size=64, num_layers=2, output_size=1)
-        lstm_model.load_state_dict(torch.load(lstm_path, weights_only=True))
-        lstm_model.eval()
-        
-        scaler = joblib.load(scaler_path)
-        
-        with open(meta_path, 'rb') as f:
-            meta_info = pickle.load(f)
+        # Retrieve cached models to optimize memory and disk read time
+        lgb_reg, lgb_clf, meta_info = get_cached_models(ticker_upper, interval)
             
         features_path = os.path.join(PROJECT_ROOT, f"data/features_{t}_{i}.csv")
-        if i == "1d" and not os.path.exists(features_path):
-            features_path = os.path.join(PROJECT_ROOT, f"data/features_{t}.csv")
-            
         if not os.path.exists(features_path):
             raise HTTPException(status_code=404, detail=f"Feature dataset not found for {ticker_upper} ({interval}).")
             
         df = pd.read_csv(features_path)
         df['Date'] = pd.to_datetime(df['Date'])
         
-        # Legacy fallback: compute WMA 144, SMMA 5, and RSI_MA on the fly if missing from old saved feature CSVs
-        if 'WMA_144' not in df.columns or 'SMMA_5' not in df.columns or 'RSI_MA' not in df.columns:
-            from feature_engineer import compute_wma, compute_smma
-            df['WMA_144'] = compute_wma(df['Close'], 144)
-            df['SMMA_5'] = compute_smma(df['Close'], 5)
-            if 'RSI_14' in df.columns:
-                df['RSI_MA'] = df['RSI_14'].rolling(window=14).mean()
-        
         # Test predictions split (20% of data)
         split_idx = int(len(df) * 0.8)
         test_df = df.iloc[split_idx:].copy()
         
-        # ARIMA forecast
-        arima_test_preds = arima_result.forecast(steps=len(test_df))
-        test_df['ARIMA_Pred'] = arima_test_preds
-        test_df['Residual'] = test_df['Close'] - test_df['ARIMA_Pred']
-        
-        # Scale test residuals
-        test_residuals = test_df['Residual'].values.reshape(-1, 1)
-        scaled_test_residuals = scaler.transform(test_residuals).flatten()
-        scaled_train_residuals = scaler.transform(
-            (df.iloc[:split_idx]['Close'] - arima_result.fittedvalues).values.reshape(-1, 1)
-        ).flatten()
-        
-        # LSTM input prep
-        seq_len = meta_info['seq_length']
-        full_residuals = np.concatenate([scaled_train_residuals[-seq_len:], scaled_test_residuals])
-        
-        X_lstm = []
-        for i_idx in range(len(full_residuals) - seq_len):
-            X_lstm.append(full_residuals[i_idx:(i_idx + seq_len)])
-        X_lstm = np.array(X_lstm)
-        
-        with torch.no_grad():
-            X_tensor = torch.tensor(X_lstm, dtype=torch.float32).unsqueeze(-1)
-            lstm_scaled_preds = lstm_model(X_tensor).numpy().flatten()
-            
-        lstm_preds = scaler.inverse_transform(lstm_scaled_preds.reshape(-1, 1)).flatten()
-        test_df['LSTM_Pred'] = lstm_preds
-        test_df['Hybrid_Pred'] = test_df['ARIMA_Pred'] + test_df['LSTM_Pred']
+        # Predict on Test set using LightGBM
+        feature_cols = meta_info['feature_cols']
+        test_df['Reg_Pred'] = lgb_reg.predict(test_df[feature_cols])
+        test_df['Clf_Pred_Prob'] = lgb_clf.predict(test_df[feature_cols])
+        test_df['Clf_Pred_Dir'] = (test_df['Clf_Pred_Prob'] > 0.5).astype(int)
         
         # Make one-step out prediction (tomorrow)
         last_close = float(df.iloc[-1]['Close'])
-        try:
-            updated_arima = arima_result.apply(df['Close'].values)
-            arima_next_pred = updated_arima.forecast(steps=1)[0]
-            recent_res = (df['Close'].values - updated_arima.fittedvalues)[-seq_len:]
-        except Exception as e:
-            # Fallback if apply fails
-            arima_next_pred = arima_result.forecast(steps=1)[0]
-            recent_res = (df['Close'].values - arima_result.predict(start=0, end=len(df)-1))[-seq_len:]
-            
-        scaled_recent_res = scaler.transform(recent_res.reshape(-1, 1)).flatten()
-        X_lstm_next = torch.tensor(scaled_recent_res.reshape((1, seq_len, 1)), dtype=torch.float32)
+        latest_features = df[feature_cols].iloc[-1:]
         
-        with torch.no_grad():
-            lstm_next_scaled = lstm_model(X_lstm_next).item()
-        lstm_next_pred = scaler.inverse_transform([[lstm_next_scaled]])[0][0]
-        predicted_close_next = arima_next_pred + lstm_next_pred
-        predicted_direction_next = "Up" if predicted_close_next > last_close else "Down"
+        predicted_close_next = float(lgb_reg.predict(latest_features)[0])
+        predicted_direction_prob = float(lgb_clf.predict(latest_features)[0])
+        predicted_direction_next = "Up" if predicted_direction_prob > 0.5 else "Down"
         
         # Check if dataset has intraday dates to determine formatting
         is_intraday = df['Date'].dt.time.nunique() > 1
@@ -394,7 +352,14 @@ def get_predictions(ticker: str, interval: str = "1d"):
                 "fvg_bearish_size": float(row['FVG_Bearish_Size']) if 'FVG_Bearish_Size' in row else 0.0,
                 
                 # Elliott Wave
-                "elliott_wave": int(row['Elliott_Wave']) if 'Elliott_Wave' in row else 0
+                "elliott_wave": int(row['Elliott_Wave']) if 'Elliott_Wave' in row else 0,
+                
+                # Fibonacci levels (rolling 20 period window)
+                "fib_236": float(row['Fib_236_20']) if 'Fib_236_20' in row else None,
+                "fib_382": float(row['Fib_382_20']) if 'Fib_382_20' in row else None,
+                "fib_500": float(row['Fib_500_20']) if 'Fib_500_20' in row else None,
+                "fib_618": float(row['Fib_618_20']) if 'Fib_618_20' in row else None,
+                "fib_786": float(row['Fib_786_20']) if 'Fib_786_20' in row else None,
             }
             if arima_val is not None:
                 d["arima"] = float(arima_val)
@@ -414,13 +379,13 @@ def get_predictions(ticker: str, interval: str = "1d"):
             predictions.append(row_to_dict(
                 row, 
                 "test", 
-                arima_val=row['ARIMA_Pred'], 
-                hybrid_val=row['Hybrid_Pred']
+                arima_val=row['Reg_Pred'], 
+                hybrid_val=row['Reg_Pred']
             ))
             
-        # Overall directional accuracy of hybrid model
+        # Overall directional accuracy of LightGBM model
         test_df['Actual_Dir'] = (test_df['Close'].diff() > 0).astype(int)
-        test_df['Pred_Dir'] = (test_df['Hybrid_Pred'].diff() > 0).astype(int)
+        test_df['Pred_Dir'] = test_df['Clf_Pred_Dir']
         correct_dir = int((test_df['Actual_Dir'].iloc[1:] == test_df['Pred_Dir'].iloc[1:]).sum())
         total_dir = len(test_df) - 1
         accuracy = correct_dir / total_dir if total_dir > 0 else 0.0
@@ -454,25 +419,14 @@ def get_explainability(ticker: str, interval: str = "1d"):
         t = ticker_upper.lower()
         i = interval.lower()
         
-        # Load LightGBM model and features (paths resolved from project root)
-        lgb_path = os.path.join(PROJECT_ROOT, f"models/lgb_{t}_{i}.txt")
-        meta_path = os.path.join(PROJECT_ROOT, f"models/meta_{t}_{i}.pkl")
-        
-        if i == "1d" and not os.path.exists(lgb_path):
-            lgb_path = os.path.join(PROJECT_ROOT, f"models/lgb_{t}.txt")
-            meta_path = os.path.join(PROJECT_ROOT, f"models/meta_{t}.pkl")
-            
-        lgb_model = lgb.Booster(model_file=lgb_path)
+        # Retrieve cached models to optimize memory and disk read time
+        _, lgb_model, meta_info = get_cached_models(ticker_upper, interval)
         
         features_path = os.path.join(PROJECT_ROOT, f"data/features_{t}_{i}.csv")
         if i == "1d" and not os.path.exists(features_path):
             features_path = os.path.join(PROJECT_ROOT, f"data/features_{t}.csv")
             
         df = pd.read_csv(features_path)
-        
-        # Load meta info dynamically to get the trained list of feature columns
-        with open(meta_path, 'rb') as f:
-            meta_info = pickle.load(f)
             
         feature_cols = meta_info.get('feature_cols', [
             'Return_Lag_1', 'Return_Lag_2', 'Return_Lag_3', 'Return_Lag_5', 'Return_Lag_10',

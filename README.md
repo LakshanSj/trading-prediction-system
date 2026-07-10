@@ -1,24 +1,25 @@
 # 📈 AI Stock & Crypto Prediction System
 
-A hybrid price forecasting application combining statistical and machine learning models to predict stock and cryptocurrency trends.
+A machine learning price forecasting and trend prediction application combining advanced technical indicators, SMC, Elliott Wave, Fibonacci retracement levels, and Explainable AI (SHAP).
 
 ---
 
 ## 💡 What the System Does
-1. **Hybrid Forecasting:** Fits an **ARIMA** model on historical price trends, trains a **PyTorch LSTM** neural network on residuals to forecast deviations, and combines them for the final hybrid price prediction.
-2. **Directional Classification:** Uses a **LightGBM** classifier to predict whether the asset price will move Up or Down.
-3. **Explainable AI (SHAP):** Visualizes which technical indicators (RSI, MACD, Bollinger Bands, Moving Averages, etc.) had the greatest impact on the predictions.
-4. **Smart Money Concepts (SMC):** Analyzes Order Blocks, Break of Structure (BOS), and Change of Character (CHOCH) for advanced price action.
-5. **Admin Logging Panel:** Tracks all background training tasks, predictions, and model health metrics in real-time.
+1. **LightGBM Price Regression:** Trains a **LightGBM Regressor** directly on engineered technical features to forecast the exact numerical Close price for the next trading interval.
+2. **LightGBM Trend Classification:** Trains a **LightGBM Classifier** to predict the binary direction of the next interval (Up or Down) with probability scores.
+3. **Fibonacci Retracement Levels:** Computes rolling 20-period and 50-period high/low windows to calculate standard Fibonacci levels (23.6%, 38.2%, 50.0%, 61.8%, 78.6%) and feeds distance indicators directly into the predictive models.
+4. **Smart Money Concepts (SMC) & Elliott Waves:** Extends standard technical analysis with Order Blocks, Break of Structure (BOS), Change of Character (CHOCH), Fair Value Gaps (FVG), premium/discount zones, and Elliott Wave indicators.
+5. **Explainable AI (SHAP):** Visualizes feature importance and individual feature SHAP contribution values to explain why the model predicts an upward/downward movement.
+6. **Admin Logging Panel:** Provides audit logs, event logs, and model performance metrics via real-time monitoring statistics.
 
 ---
 
 ## 🚀 How to Run Locally
 
-Start both the backend and frontend simultaneously with our one-click script:
+Start both the backend and frontend simultaneously with our PowerShell launcher:
 
 1. Right-click **`start-local.ps1`** and choose **Run with PowerShell** (or run `.\start-local.ps1` in your terminal).
-2. The script will automatically verify virtual environments, install dependencies, and launch the servers.
+2. The script automatically creates the virtual environment, installs dependencies from `requirements.txt`, and boots up the API and dashboard.
 3. Access the applications:
    - **Interactive Dashboard:** `http://localhost:5173`
    - **Backend API Documentation:** `http://localhost:8000/docs`
@@ -33,7 +34,7 @@ Click the **Admin** button in the top-right corner of the React dashboard to ins
 ---
 
 ## 📂 Folder Structure
-- `/src` — Core Python machine learning pipeline (ARIMA-LSTM models, technical features).
-- `/src/api` — FastAPI endpoint routes and activity logging logic.
-- `/frontend` — React Vite frontend dashboard (Recharts data charts).
+- `/src` — Core Python machine learning pipeline (LightGBM training, Fibonacci features, walk-forward validation).
+- `/src/api` — FastAPI endpoint routes, admin panel auth, and activity logging logic.
+- `/frontend` — React Vite frontend dashboard (Recharts charts, explainability panels).
 - `start-local.ps1` — Local launcher script.

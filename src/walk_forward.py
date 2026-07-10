@@ -2,30 +2,7 @@ import os
 import argparse
 import pandas as pd
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from statsmodels.tsa.arima.model import ARIMA
-from sklearn.preprocessing import MinMaxScaler
-
-# Define local PyTorch LSTM model
-class ResidualLSTM(nn.Module):
-    def __init__(self, input_size=1, hidden_size=32, num_layers=1, output_size=1):
-        super(ResidualLSTM, self).__init__()
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
-        self.fc = nn.Linear(hidden_size, output_size)
-        
-    def forward(self, x):
-        out, _ = self.lstm(x)
-        out = self.fc(out[:, -1, :])
-        return out
-
-def create_lstm_sequences(data, seq_length):
-    X, y = [], []
-    for i in range(len(data) - seq_length):
-        X.append(data[i:(i + seq_length)])
-        y.append(data[i + seq_length])
-    return np.array(X), np.array(y)
+import lightgbm as lgb
 
 def calculate_sharpe_ratio(returns, risk_free_rate=0.0):
     if len(returns) == 0 or returns.std() == 0:
@@ -42,123 +19,162 @@ def calculate_max_drawdown(returns):
     drawdowns = (peaks - equity_curve) / peaks
     return drawdowns.max()
 
-def run_wfv(feature_path: str, train_size=750, test_size=250, step_size=250, seq_length=10, arima_order=(5, 1, 0), epochs=5):
+def run_wfv(feature_path: str, train_size=750, test_size=250, step_size=250, epochs=5):
     """
-    Executes walk-forward validation on feature-engineered stock data using PyTorch.
+    Executes walk-forward validation on feature-engineered stock data using LightGBM.
     """
     print(f"Loading features for Walk-Forward Validation from '{feature_path}'...")
     df = pd.read_csv(feature_path)
     df['Date'] = pd.to_datetime(df['Date'])
     df = df.sort_values('Date').reset_index(drop=True)
     
-    total_len = len(df)
+    # Target values: predict tomorrow's close price and trend direction
+    df['Target_Close'] = df['Close'].shift(-1)
+    df['Target_Direction'] = (df['Close'].shift(-1) > df['Close']).astype(int)
+    
+    # Drop last row since it doesn't have a shift target
+    df_clean = df.dropna(subset=['Target_Close']).reset_index(drop=True)
+    
+    total_len = len(df_clean)
     print(f"Total rows available: {total_len}. Original parameters: Train size = {train_size}, Test size = {test_size}, Step size = {step_size}")
     
     if total_len < (train_size + test_size):
         # Dynamically adjust train/test/step size if the dataset is small!
-        # E.g. train_size = 60% of total_len, test_size = 20% of total_len, step_size = test_size
         train_size = int(total_len * 0.6)
         test_size = int(total_len * 0.2)
         step_size = test_size
         print(f"Adjusted WFV parameters due to small dataset: Train size = {train_size}, Test size = {test_size}, Step size = {step_size}")
         if train_size < 10 or test_size < 3:
             raise ValueError(f"Insufficient data ({total_len} rows) even after dynamic scaling for walk-forward validation.")
-        
+            
+    feature_cols = [
+        'Return_Lag_1', 'Return_Lag_2', 'Return_Lag_3', 'Return_Lag_5', 'Return_Lag_10',
+        'Vol_5', 'Vol_10', 'Vol_20',
+        'SMA_10', 'SMA_20', 'SMA_50', 'SMA_200',
+        'EMA_9', 'EMA_12', 'EMA_20', 'EMA_26', 'EMA_50', 'EMA_200',
+        'Golden_Cross', 'Death_Cross', 'Dist_SMA_50', 'Dist_SMA_200',
+        'MA_Stack_Spread', 'MA_Stack_Order',
+        'Support_Bounce_50', 'Support_Bounce_200',
+        'Resistance_Rejection_50', 'Resistance_Rejection_200',
+        'RSI_14', 'MACD', 'MACD_Signal', 'MACD_Hist',
+        'Stoch_K', 'Stoch_D', 'CCI_20',
+        'BB_Upper', 'BB_Lower', 'BB_Bandwidth', 'BB_Percent',
+        'BOS', 'CHOCH',
+        'Bullish_OB_High', 'Bullish_OB_Low', 'Bearish_OB_High', 'Bearish_OB_Low',
+        'Sweep_High', 'Sweep_Low',
+        'FVG_Bullish', 'FVG_Bullish_Size', 'FVG_Bearish', 'FVG_Bearish_Size',
+        'Elliott_Wave',
+        # Fibonacci features
+        'Dist_Fib_236_20', 'Dist_Fib_382_20', 'Dist_Fib_500_20', 'Dist_Fib_618_20', 'Dist_Fib_786_20',
+        'Dist_Fib_236_50', 'Dist_Fib_382_50', 'Dist_Fib_500_50', 'Dist_Fib_618_50', 'Dist_Fib_786_50'
+    ]
+    
+    # Dynamically append PDF strategy patterns if present
+    pdf_features = [
+        'CDL_Hammer', 'CDL_Inverted_Hammer', 'CDL_Shooting_Star', 'CDL_Doji',
+        'CDL_Bullish_Engulfing', 'CDL_Bearish_Engulfing', 'CDL_Marubozu',
+        'Pattern_Double_Top', 'Pattern_Double_Bottom',
+        'SMC_Breaker_Bullish', 'SMC_Breaker_Bearish', 'SMC_Premium_Discount'
+    ]
+    for pf in pdf_features:
+        if pf in df_clean.columns:
+            feature_cols.append(pf)
+            
     start_idx = 0
     fold = 1
     results = []
     
+    # Hyperparameters matching the optimized train_model setup
+    reg_params = {
+        'objective': 'regression',
+        'metric': 'rmse',
+        'boosting_type': 'gbdt',
+        'learning_rate': 0.03,
+        'num_leaves': 15,
+        'max_depth': 5,
+        'feature_fraction': 0.8,
+        'bagging_fraction': 0.8,
+        'bagging_freq': 5,
+        'min_data_in_leaf': 15,
+        'lambda_l1': 0.1,
+        'lambda_l2': 0.1,
+        'verbose': -1,
+        'random_state': 42
+    }
+    
+    clf_params = {
+        'objective': 'binary',
+        'metric': 'binary_logloss',
+        'boosting_type': 'gbdt',
+        'learning_rate': 0.03,
+        'num_leaves': 15,
+        'max_depth': 5,
+        'feature_fraction': 0.8,
+        'bagging_fraction': 0.8,
+        'bagging_freq': 5,
+        'min_data_in_leaf': 15,
+        'lambda_l1': 0.1,
+        'lambda_l2': 0.1,
+        'verbose': -1,
+        'random_state': 42
+    }
+    
     while start_idx + train_size + test_size <= total_len:
         print(f"\n--- Running Fold {fold} ---")
-        train_df = df.iloc[start_idx : start_idx + train_size].copy()
-        test_df = df.iloc[start_idx + train_size : start_idx + train_size + test_size].copy()
+        train_df = df_clean.iloc[start_idx : start_idx + train_size].copy()
+        test_df = df_clean.iloc[start_idx + train_size : start_idx + start_idx + train_size + test_size].copy()
         
         print(f"Train period: {train_df['Date'].min().strftime('%Y-%m-%d')} to {train_df['Date'].max().strftime('%Y-%m-%d')}")
         print(f"Test period:  {test_df['Date'].min().strftime('%Y-%m-%d')} to {test_df['Date'].max().strftime('%Y-%m-%d')}")
         
-        # 1. Fit ARIMA on train close
-        train_close = train_df['Close'].values
-        arima_model = ARIMA(train_close, order=arima_order)
-        try:
-            arima_result = arima_model.fit()
-        except Exception as e:
-            print(f"ARIMA fitting failed in fold {fold}: {e}. Skipping this fold.")
-            start_idx += step_size
-            fold += 1
-            continue
-            
-        train_df['ARIMA_Pred'] = arima_result.fittedvalues
-        train_df['Residual'] = train_df['Close'] - train_df['ARIMA_Pred']
+        X_train = train_df[feature_cols]
+        y_train_close = train_df['Target_Close']
+        y_train_dir = train_df['Target_Direction']
         
-        # 2. Scale residuals
-        scaler = MinMaxScaler(feature_range=(-1, 1))
-        train_residuals = train_df['Residual'].values.reshape(-1, 1)
-        scaled_residuals = scaler.fit_transform(train_residuals).flatten()
+        X_test = test_df[feature_cols]
+        y_test_close = test_df['Target_Close']
+        y_test_dir = test_df['Target_Direction']
         
-        # 3. Create sequences for LSTM
-        # Adjust seq_length if it exceeds scaled_residuals length
-        fold_seq_length = seq_length
-        if len(scaled_residuals) <= fold_seq_length:
-            fold_seq_length = max(2, len(scaled_residuals) // 2)
-            print(f"Adjusted sequence length for fold to {fold_seq_length}")
-            
-        X_lstm, y_lstm = create_lstm_sequences(scaled_residuals, fold_seq_length)
+        # 1. Train LightGBM Regressor
+        lgb_reg_train = lgb.Dataset(X_train, label=y_train_close)
+        lgb_reg_val = lgb.Dataset(X_test, label=y_test_close, reference=lgb_reg_train)
+        lgb_reg = lgb.train(
+            reg_params, 
+            lgb_reg_train, 
+            num_boost_round=150,
+            valid_sets=[lgb_reg_train, lgb_reg_val],
+            callbacks=[lgb.early_stopping(20, verbose=False)]
+        )
         
-        # Convert to PyTorch tensors
-        X_tensor = torch.tensor(X_lstm, dtype=torch.float32).unsqueeze(-1) # shape (samples, seq_length, 1)
-        y_tensor = torch.tensor(y_lstm, dtype=torch.float32).unsqueeze(-1) # shape (samples, 1)
+        # 2. Train LightGBM Classifier
+        lgb_clf_train = lgb.Dataset(X_train, label=y_train_dir)
+        lgb_clf_val = lgb.Dataset(X_test, label=y_test_dir, reference=lgb_clf_train)
+        lgb_clf = lgb.train(
+            clf_params, 
+            lgb_clf_train, 
+            num_boost_round=150,
+            valid_sets=[lgb_clf_train, lgb_clf_val],
+            callbacks=[lgb.early_stopping(20, verbose=False)]
+        )
         
-        # Build and train PyTorch LSTM
-        model = ResidualLSTM(input_size=1, hidden_size=32, num_layers=1, output_size=1)
-        criterion = nn.MSELoss()
-        optimizer = optim.Adam(model.parameters(), lr=0.005)
+        # 3. Predict on Test
+        pred_closes = lgb_reg.predict(X_test)
+        pred_dir_probs = lgb_clf.predict(X_test)
+        pred_dirs = (pred_dir_probs > 0.5).astype(int)
         
-        model.train()
-        for epoch in range(epochs):
-            optimizer.zero_grad()
-            outputs = model(X_tensor)
-            loss = criterion(outputs, y_tensor)
-            loss.backward()
-            optimizer.step()
-            
-        # 4. Predict on Test
-        arima_test_preds = arima_result.forecast(steps=len(test_df))
-        test_df['ARIMA_Pred'] = arima_test_preds
-        test_df['Residual'] = test_df['Close'] - test_df['ARIMA_Pred']
+        test_df['Reg_Pred_Close'] = pred_closes
+        test_df['Pred_Dir'] = pred_dirs
         
-        # Scale test residuals
-        test_residuals = test_df['Residual'].values.reshape(-1, 1)
-        scaled_test_residuals = scaler.transform(test_residuals).flatten()
-        
-        # Prepare LSTM inputs for test
-        full_residuals = np.concatenate([scaled_residuals[-fold_seq_length:], scaled_test_residuals])
-        X_test_lstm, _ = create_lstm_sequences(full_residuals, fold_seq_length)
-        X_test_tensor = torch.tensor(X_test_lstm, dtype=torch.float32).unsqueeze(-1)
-        
-        # Predict LSTM (PyTorch inference)
-        model.eval()
-        with torch.no_grad():
-            lstm_scaled_preds = model(X_test_tensor).numpy().flatten()
-            
-        lstm_preds = scaler.inverse_transform(lstm_scaled_preds.reshape(-1, 1)).flatten()
-        
-        test_df['LSTM_Pred'] = lstm_preds
-        test_df['Hybrid_Pred'] = test_df['ARIMA_Pred'] + test_df['LSTM_Pred']
-        
-        # 5. Evaluate fold metrics
+        # 4. Evaluate fold metrics
         test_df['Actual_Return'] = test_df['Close'].pct_change()
         test_df['Actual_Dir'] = (test_df['Actual_Return'] > 0).astype(int)
-        
-        test_df['Prev_Close'] = test_df['Close'].shift(1)
-        test_df['Pred_Change'] = test_df['Hybrid_Pred'] - test_df['Prev_Close']
-        test_df['Pred_Dir'] = (test_df['Pred_Change'] > 0).astype(int)
         
         eval_df = test_df.dropna().copy()
         
         correct_preds = (eval_df['Actual_Dir'] == eval_df['Pred_Dir']).sum()
         accuracy = correct_preds / len(eval_df) if len(eval_df) > 0 else 0.0
         
-        eval_df['Position'] = np.where(eval_df['Pred_Change'] > 0, 1, -1)
+        eval_df['Position'] = np.where(eval_df['Pred_Dir'] == 1, 1, -1)
         eval_df['Strategy_Return'] = eval_df['Position'] * eval_df['Actual_Return']
         
         sharpe = calculate_sharpe_ratio(eval_df['Strategy_Return'])
@@ -208,7 +224,7 @@ if __name__ == "__main__":
     parser.add_argument("--train_size", type=int, default=750, help="Number of trading days for training")
     parser.add_argument("--test_size", type=int, default=250, help="Number of trading days for testing")
     parser.add_argument("--step_size", type=int, default=250, help="Slide step size in trading days")
-    parser.add_argument("--epochs", type=int, default=5, help="Number of LSTM epochs per fold")
+    parser.add_argument("--epochs", type=int, default=5, help="Epochs argument (kept for CLI compatibility)")
     
     args = parser.parse_args()
     

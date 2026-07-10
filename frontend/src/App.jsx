@@ -318,7 +318,8 @@ function App() {
       } else if (data.status === 'trained') {
         setTrainLoading(false);
         // Load predictions & explainability automatically
-        fetchPredictionAndExplainability(symbol, currentInterval);
+        const trainedAt = data.meta?.trained_at || null;
+        fetchPredictionAndExplainability(symbol, currentInterval, trainedAt);
       } else {
         setTrainLoading(false);
         // Clean data if untrained
@@ -335,6 +336,26 @@ function App() {
     logUserAction('ASSET_SEARCH', { ticker: ticker, timeframe: intervalVal });
     return () => stopStatusPolling();
   }, [ticker, intervalVal, logUserAction]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-save prediction record when currentUser resolves and predictionData is loaded
+  useEffect(() => {
+    if (currentUser && predictionData && predictionData.history && predictionData.history.length > 0) {
+      const trainedAt = tickerStatus?.meta?.trained_at || new Date().toISOString();
+      dbService.savePredictionRecord({
+        ticker: ticker,
+        predict: predictionData.predicted_direction_tomorrow,
+        accuracy: predictionData.directional_accuracy,
+        trained_at: trainedAt
+      }).then(saved => {
+        if (saved) {
+          console.log(`Saved performance record for ${ticker} successfully on auth resolution.`);
+          if (activeTab === 'growth') {
+            loadPredictionRecords();
+          }
+        }
+      });
+    }
+  }, [currentUser, predictionData, ticker, tickerStatus, activeTab, loadPredictionRecords]);
 
   // Polling logic for background training status
   const startStatusPolling = (symbol, currentInterval) => {
@@ -361,7 +382,8 @@ function App() {
           if (data.status === 'trained') {
             setLogMessages(prev => [...prev, "Training completed successfully!", "Saved models to disk."]);
             setTicker(symbol);
-            fetchPredictionAndExplainability(symbol, currentInterval);
+            const trainedAt = data.meta?.trained_at || null;
+            fetchPredictionAndExplainability(symbol, currentInterval, trainedAt);
           } else {
             setLogMessages(prev => [...prev, `Training failed: ${data.message}`]);
           }
@@ -379,7 +401,7 @@ function App() {
     }
   };
 
-  const fetchPredictionAndExplainability = async (symbol, currentInterval) => {
+  const fetchPredictionAndExplainability = async (symbol, currentInterval, trainedAtOverride = null) => {
     try {
       // Fetch Predictions and Explainability in parallel
       const [predRes, expRes] = await Promise.all([
@@ -392,7 +414,7 @@ function App() {
         
         // Save prediction performance record using model trained timestamp
         if (currentUser && predVal.history && predVal.history.length > 0) {
-          const trainedAt = tickerStatus?.meta?.trained_at || new Date().toISOString();
+          const trainedAt = trainedAtOverride || tickerStatus?.meta?.trained_at || new Date().toISOString();
           dbService.savePredictionRecord({
             ticker: symbol,
             predict: predVal.predicted_direction_tomorrow,
@@ -737,7 +759,7 @@ function App() {
           <TrendingUp className="brand-logo" />
           <div className="brand-text">
             <h1>AI Stock Trend Prediction System</h1>
-            <p>Hybrid ARIMA-LSTM Forecasting & Explainable AI Dashboard</p>
+            <p>LightGBM Price Forecasting & Explainable AI Dashboard</p>
           </div>
         </div>
         
@@ -915,7 +937,7 @@ function App() {
               </div>
 
               <div className="config-group">
-                <label>LSTM Training Epochs: <span className="highlight-val">{epochs}</span></label>
+                <label>LightGBM Training Rounds: <span className="highlight-val">{epochs}</span></label>
                 <input 
                   type="range" 
                   min="1" 
@@ -1027,7 +1049,7 @@ function App() {
               <div className="metric-card">
                 <span className="metric-title">Predicted Next Close</span>
                 <span className="metric-value">${predictionData.predicted_close_tomorrow.toFixed(2)}</span>
-                <span className="metric-subtitle">ARIMA + LSTM residual</span>
+                <span className="metric-subtitle">LightGBM Regressor</span>
               </div>
               <div className="metric-card">
                 <span className="metric-title">Directional Accuracy</span>
@@ -1071,11 +1093,11 @@ function App() {
               <AlertTriangle className="empty-icon" size={48} />
               <h2>Model Untrained for {ticker}</h2>
               <p>
-                No hybrid forecasting models were found on disk for ticker symbol **{ticker}**. 
+                No LightGBM forecasting models were found on disk for ticker symbol **{ticker}**. 
                 Click the button below or in the sidebar to download Yahoo Finance daily price data and execute the ML pipeline.
               </p>
               <button onClick={triggerTraining} className="action-btn primary-btn large-btn">
-                <Play size={16} /> Fetch & Train ARIMA-LSTM Hybrid
+                <Play size={16} /> Fetch & Train LightGBM Models
               </button>
             </div>
           )}
@@ -1138,7 +1160,7 @@ function App() {
                   <div className="tab-panel">
                     <div className="panel-header-desc">
                       <h3>Historical Prices & Advanced Technical Analysis</h3>
-                      <p>Displays hybrid ARIMA-LSTM predictions along with overlays for moving averages, Bollinger Bands, and Smart Money Concepts (SMC) zones. Includes oscillators and pattern analyzers.</p>
+                      <p>Displays LightGBM predictions along with overlays for moving averages, Bollinger Bands, and Smart Money Concepts (SMC) zones. Includes oscillators and pattern analyzers.</p>
                     </div>
 
                     <div className="predictions-layout" style={{ position: 'relative' }}>
