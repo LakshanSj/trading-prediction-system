@@ -35,6 +35,11 @@ def run_wfv(feature_path: str, train_size=750, test_size=250, step_size=250, epo
     # Drop last row since it doesn't have a shift target
     df_clean = df.dropna(subset=['Target_Close']).reset_index(drop=True)
     
+    # Ensure regime labels are computed
+    if 'Regime_Label' not in df_clean.columns:
+        from regime_detector import detect_market_regimes
+        df_clean = detect_market_regimes(df_clean)
+    
     total_len = len(df_clean)
     print(f"Total rows available: {total_len}. Original parameters: Train size = {train_size}, Test size = {test_size}, Step size = {step_size}")
     
@@ -135,7 +140,7 @@ def run_wfv(feature_path: str, train_size=750, test_size=250, step_size=250, epo
         y_test_close = test_df['Target_Close']
         y_test_dir = test_df['Target_Direction']
         
-        # 1. Train LightGBM Regressor
+        # 1. Train Global LightGBM Regressor
         lgb_reg_train = lgb.Dataset(X_train, label=y_train_close)
         lgb_reg_val = lgb.Dataset(X_test, label=y_test_close, reference=lgb_reg_train)
         lgb_reg = lgb.train(
@@ -146,7 +151,7 @@ def run_wfv(feature_path: str, train_size=750, test_size=250, step_size=250, epo
             callbacks=[lgb.early_stopping(20, verbose=False)]
         )
         
-        # 2. Train LightGBM Classifier
+        # 2. Train Global LightGBM Classifier
         lgb_clf_train = lgb.Dataset(X_train, label=y_train_dir)
         lgb_clf_val = lgb.Dataset(X_test, label=y_test_dir, reference=lgb_clf_train)
         lgb_clf = lgb.train(
@@ -157,9 +162,72 @@ def run_wfv(feature_path: str, train_size=750, test_size=250, step_size=250, epo
             callbacks=[lgb.early_stopping(20, verbose=False)]
         )
         
-        # 3. Predict on Test
-        pred_closes = lgb_reg.predict(X_test)
-        pred_dir_probs = lgb_clf.predict(X_test)
+        # 2.5 Train Regime-Specific Models
+        regime_reg_models = {}
+        regime_clf_models = {}
+        
+        for r in [0, 1, 2, 3]:
+            train_regime = train_df[train_df['Regime_Label'] == r]
+            if len(train_regime) >= 150:
+                X_train_r = train_regime[feature_cols]
+                y_train_close_r = train_regime['Target_Close']
+                y_train_dir_r = train_regime['Target_Direction']
+                
+                # Use matching validation subset or fallback to global test
+                test_regime = test_df[test_df['Regime_Label'] == r]
+                if len(test_regime) >= 20:
+                    X_val_r = test_regime[feature_cols]
+                    y_val_close_r = test_regime['Target_Close']
+                    y_val_dir_r = test_regime['Target_Direction']
+                else:
+                    X_val_r = X_test
+                    y_val_close_r = y_test_close
+                    y_val_dir_r = y_test_dir
+                
+                # Regressor
+                ds_reg_train = lgb.Dataset(X_train_r, label=y_train_close_r)
+                ds_reg_val = lgb.Dataset(X_val_r, label=y_val_close_r, reference=ds_reg_train)
+                lgb_reg_r = lgb.train(
+                    reg_params,
+                    ds_reg_train,
+                    num_boost_round=150,
+                    valid_sets=[ds_reg_train, ds_reg_val],
+                    callbacks=[lgb.early_stopping(20, verbose=False)]
+                )
+                regime_reg_models[r] = lgb_reg_r
+                
+                # Classifier
+                ds_clf_train = lgb.Dataset(X_train_r, label=y_train_dir_r)
+                ds_clf_val = lgb.Dataset(X_val_r, label=y_val_dir_r, reference=ds_clf_train)
+                lgb_clf_r = lgb.train(
+                    clf_params,
+                    ds_clf_train,
+                    num_boost_round=150,
+                    valid_sets=[ds_clf_train, ds_clf_val],
+                    callbacks=[lgb.early_stopping(20, verbose=False)]
+                )
+                regime_clf_models[r] = lgb_clf_r
+        
+        # 3. Predict on Test set using Regime Router
+        pred_closes = []
+        pred_dir_probs = []
+        
+        for idx_row, row in test_df.iterrows():
+            r_label = int(row['Regime_Label'])
+            feat_vector = row[feature_cols].to_frame().T.astype(float)
+            
+            if r_label in regime_reg_models:
+                pred_close_val = regime_reg_models[r_label].predict(feat_vector)[0]
+                pred_dir_prob = regime_clf_models[r_label].predict(feat_vector)[0]
+            else:
+                pred_close_val = lgb_reg.predict(feat_vector)[0]
+                pred_dir_prob = lgb_clf.predict(feat_vector)[0]
+                
+            pred_closes.append(pred_close_val)
+            pred_dir_probs.append(pred_dir_prob)
+            
+        pred_closes = np.array(pred_closes)
+        pred_dir_probs = np.array(pred_dir_probs)
         pred_dirs = (pred_dir_probs > 0.5).astype(int)
         
         test_df['Reg_Pred_Close'] = pred_closes

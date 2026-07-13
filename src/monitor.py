@@ -140,6 +140,10 @@ def run_monitoring(ticker: str, interval: str = "1d", alert_threshold=0.50, min_
             'Date', 'Predicted_Close', 'Predicted_Direction', 'Actual_Close', 'Actual_Direction', 'Correct'
         ])
         
+    # Force direction columns to object/string to prevent pandas type conversion crashes
+    monitor_df['Predicted_Direction'] = monitor_df['Predicted_Direction'].astype(object)
+    monitor_df['Actual_Direction'] = monitor_df['Actual_Direction'].astype(object)
+        
     # --- STEP A: Update actuals for past predictions ---
     if len(monitor_df) > 0:
         print("Updating actual outcomes for previous predictions...")
@@ -217,11 +221,36 @@ def run_monitoring(ticker: str, interval: str = "1d", alert_threshold=0.50, min_
         feature_cols = meta_info['feature_cols']
         latest_features = df_features[feature_cols].iloc[-1:]
         
-        # Predict Close Price using LightGBM Regressor
-        predicted_close = float(lgb_reg.predict(latest_features)[0])
+        # Determine the regime of the latest bar
+        regime_label = int(df_features.iloc[-1]['Regime_Label'])
+        regime_names_map = {0: "Bull", 1: "Bear", 2: "Sideways", 3: "High Volatility"}
+        regime_name = regime_names_map.get(regime_label, "Sideways")
         
-        # Predict Direction using LightGBM Classifier
-        pred_dir_prob = float(lgb_clf.predict(latest_features)[0])
+        # Load specialized regime model if it was trained
+        regimes_trained = meta_info.get('regimes_trained', {})
+        use_spec = regimes_trained.get(str(regime_label), False) or regimes_trained.get(regime_label, False)
+        
+        if use_spec:
+            try:
+                reg_spec_path = f"models/lgb_reg_{ticker}_{interval_lower}_regime_{regime_label}.txt"
+                clf_spec_path = f"models/lgb_clf_{ticker}_{interval_lower}_regime_{regime_label}.txt"
+                lgb_reg_model = lgb.Booster(model_file=reg_spec_path)
+                lgb_clf_model = lgb.Booster(model_file=clf_spec_path)
+                print(f"Routing next prediction to specialized regime model: '{regime_name}'")
+            except Exception as e:
+                print(f"Error loading regime model, falling back to global: {e}")
+                lgb_reg_model = lgb_reg
+                lgb_clf_model = lgb_clf
+        else:
+            print(f"No specialized model trained for regime '{regime_name}'. Routing to global models.")
+            lgb_reg_model = lgb_reg
+            lgb_clf_model = lgb_clf
+            
+        # Predict Close Price
+        predicted_close = float(lgb_reg_model.predict(latest_features)[0])
+        
+        # Predict Direction
+        pred_dir_prob = float(lgb_clf_model.predict(latest_features)[0])
         predicted_direction = "Up" if pred_dir_prob > 0.5 else "Down"
         
         # Append to monitor dataframe

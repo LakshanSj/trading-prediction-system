@@ -498,6 +498,16 @@ def engineer_features(input_path: str, output_path: str = None) -> str:
         }
     df = compute_pdf_patterns(df, pdf_config)
     
+    # 10. Market Regime Detection
+    try:
+        from regime_detector import detect_market_regimes
+        df = detect_market_regimes(df)
+        print(f"Market regimes detected successfully. Value counts:\n{df['Regime_Name'].value_counts()}")
+    except Exception as e:
+        print(f"Error running market regime detection: {e}. Defaulting all to Sideways.")
+        df['Regime_Label'] = 2
+        df['Regime_Name'] = 'Sideways'
+    
     # Drop rows with NaNs resulting from shifts and rolling windows
     # Keep historical rows where possible, but MAs like SMA_200 will have NaNs for the first 200 rows.
     # Therefore, dropna is applied, ensuring enough data is left.

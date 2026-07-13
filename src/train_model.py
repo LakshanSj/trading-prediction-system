@@ -65,6 +65,11 @@ def train_pipeline(feature_path: str, ticker: str, interval: str = "1d", epochs=
         if pf in df_clean.columns:
             feature_cols.append(pf)
             
+    # Ensure regime labels are present in the clean dataset
+    if 'Regime_Label' not in df_clean.columns:
+        from regime_detector import detect_market_regimes
+        df_clean = detect_market_regimes(df_clean)
+
     # Chronological splits
     train_df = df_clean.iloc[:split_idx]
     test_df = df_clean.iloc[split_idx:]
@@ -112,8 +117,8 @@ def train_pipeline(feature_path: str, ticker: str, interval: str = "1d", epochs=
         'random_state': 42
     }
     
-    # --- 1. Train LightGBM Regressor (Close Price) ---
-    print("Training optimized LightGBM Regressor for close prices...")
+    # --- 1. Train Global LightGBM Regressor (Close Price) ---
+    print("Training optimized global LightGBM Regressor for close prices...")
     lgb_reg_train = lgb.Dataset(X_train, label=y_train_close)
     lgb_reg_val = lgb.Dataset(X_test, label=y_test_close, reference=lgb_reg_train)
     
@@ -125,8 +130,8 @@ def train_pipeline(feature_path: str, ticker: str, interval: str = "1d", epochs=
         callbacks=[lgb.early_stopping(20, verbose=False)]
     )
     
-    # --- 2. Train LightGBM Classifier (Trend Direction) ---
-    print("Training optimized LightGBM Classifier for trend direction...")
+    # --- 2. Train Global LightGBM Classifier (Trend Direction) ---
+    print("Training optimized global LightGBM Classifier for trend direction...")
     lgb_clf_train = lgb.Dataset(X_train, label=y_train_dir)
     lgb_clf_val = lgb.Dataset(X_test, label=y_test_dir, reference=lgb_clf_train)
     
@@ -138,22 +143,98 @@ def train_pipeline(feature_path: str, ticker: str, interval: str = "1d", epochs=
         callbacks=[lgb.early_stopping(20, verbose=False)]
     )
     
-    # --- 3. Evaluate on Test set ---
-    print("Evaluating optimized LightGBM models on test set...")
-    pred_closes = lgb_reg.predict(X_test)
-    pred_dir_probs = lgb_clf.predict(X_test)
+    # --- 3. Train Regime-Specific Models ---
+    regimes_trained = {}
+    os.makedirs("models", exist_ok=True)
+    t_lower = ticker.lower()
+    i_lower = interval.lower()
+    
+    # We have 4 regimes: 0 (Bull), 1 (Bear), 2 (Sideways), 3 (High Volatility)
+    for r in [0, 1, 2, 3]:
+        r_name = {0: "Bull", 1: "Bear", 2: "Sideways", 3: "High Volatility"}[r]
+        train_regime = train_df[train_df['Regime_Label'] == r]
+        
+        if len(train_regime) >= 150:
+            print(f"Training specialized models for regime '{r_name}' (samples: {len(train_regime)})...")
+            X_train_r = train_regime[feature_cols]
+            y_train_close_r = train_regime['Target_Close']
+            y_train_dir_r = train_regime['Target_Direction']
+            
+            # Validation set for regime
+            test_regime = test_df[test_df['Regime_Label'] == r]
+            if len(test_regime) >= 20:
+                X_val_r = test_regime[feature_cols]
+                y_val_close_r = test_regime['Target_Close']
+                y_val_dir_r = test_regime['Target_Direction']
+            else:
+                # Use global validation set if regime subset is too small
+                X_val_r = X_test
+                y_val_close_r = y_test_close
+                y_val_dir_r = y_test_dir
+                
+            # Regressor
+            ds_reg_train = lgb.Dataset(X_train_r, label=y_train_close_r)
+            ds_reg_val = lgb.Dataset(X_val_r, label=y_val_close_r, reference=ds_reg_train)
+            lgb_reg_r = lgb.train(
+                reg_params,
+                ds_reg_train,
+                num_boost_round=150,
+                valid_sets=[ds_reg_train, ds_reg_val],
+                callbacks=[lgb.early_stopping(20, verbose=False)]
+            )
+            lgb_reg_r.save_model(f"models/lgb_reg_{t_lower}_{i_lower}_regime_{r}.txt")
+            
+            # Classifier
+            ds_clf_train = lgb.Dataset(X_train_r, label=y_train_dir_r)
+            ds_clf_val = lgb.Dataset(X_val_r, label=y_val_dir_r, reference=ds_clf_train)
+            lgb_clf_r = lgb.train(
+                clf_params,
+                ds_clf_train,
+                num_boost_round=150,
+                valid_sets=[ds_clf_train, ds_clf_val],
+                callbacks=[lgb.early_stopping(20, verbose=False)]
+            )
+            lgb_clf_r.save_model(f"models/lgb_clf_{t_lower}_{i_lower}_regime_{r}.txt")
+            
+            regimes_trained[r] = True
+        else:
+            print(f"Skipping specialized models for regime '{r_name}' due to insufficient training samples ({len(train_regime)} < 150).")
+            regimes_trained[r] = False
+            
+    # --- 4. Evaluate on Test set using the Regime Router ---
+    print("Evaluating regime-routed prediction pipeline on test set...")
+    pred_closes = []
+    pred_dir_probs = []
+    
+    for idx, row in test_df.iterrows():
+        reg_label = int(row['Regime_Label'])
+        feat_vector = row[feature_cols].to_frame().T.astype(float)
+        
+        # Route to specialized model if trained, else fallback to global
+        if regimes_trained.get(reg_label, False):
+            # Load specialized regressor and classifier
+            lgb_reg_spec = lgb.Booster(model_file=f"models/lgb_reg_{t_lower}_{i_lower}_regime_{reg_label}.txt")
+            lgb_clf_spec = lgb.Booster(model_file=f"models/lgb_clf_{t_lower}_{i_lower}_regime_{reg_label}.txt")
+            
+            pred_close_val = lgb_reg_spec.predict(feat_vector)[0]
+            pred_dir_prob = lgb_clf_spec.predict(feat_vector)[0]
+        else:
+            pred_close_val = lgb_reg.predict(feat_vector)[0]
+            pred_dir_prob = lgb_clf.predict(feat_vector)[0]
+            
+        pred_closes.append(pred_close_val)
+        pred_dir_probs.append(pred_dir_prob)
+        
+    pred_closes = np.array(pred_closes)
+    pred_dir_probs = np.array(pred_dir_probs)
     pred_dirs = (pred_dir_probs > 0.5).astype(int)
     
     # Calculate directional accuracy
     correct_dir = (pred_dirs == y_test_dir).sum()
     accuracy = correct_dir / len(y_test_dir) if len(y_test_dir) > 0 else 0.0
-    print(f"Test LightGBM Directional Accuracy: {accuracy:.2%}")
+    print(f"Regime-Routed Test Directional Accuracy: {accuracy:.2%}")
     
-    # --- 4. Save models ---
-    os.makedirs("models", exist_ok=True)
-    
-    t_lower = ticker.lower()
-    i_lower = interval.lower()
+    # --- 5. Save global models and metadata ---
     lgb_reg_path = f"models/lgb_reg_{t_lower}_{i_lower}.txt"
     lgb_clf_path = f"models/lgb_clf_{t_lower}_{i_lower}.txt"
     
@@ -170,6 +251,7 @@ def train_pipeline(feature_path: str, ticker: str, interval: str = "1d", epochs=
         'train_size': int(len(train_df)),
         'test_size': int(len(test_df)),
         'epochs': epochs,
+        'regimes_trained': regimes_trained,
         'trained_at': datetime.now().isoformat()
     }
     with open(f"models/meta_{t_lower}_{i_lower}.pkl", 'wb') as f:

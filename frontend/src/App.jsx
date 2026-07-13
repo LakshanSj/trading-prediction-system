@@ -1057,6 +1057,16 @@ function App() {
                 <span className="metric-subtitle">Out-of-sample Test accuracy</span>
               </div>
               <div className="metric-card">
+                <span className="metric-title">Market Regime</span>
+                <span className="metric-value" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  {predictionData.active_regime === 'Bull' ? "🐂 Bull Trend" : 
+                   predictionData.active_regime === 'Bear' ? "🐻 Bear Trend" : 
+                   predictionData.active_regime === 'High Volatility' ? "⚡ Volatile" : 
+                   "↔️ Sideways"}
+                </span>
+                <span className="metric-subtitle">{predictionData.model_used || "Global Fallback"}</span>
+              </div>
+              <div className="metric-card">
                 <span className="metric-title">Model Health Status</span>
                 {monitorData?.decay_warning ? (
                   <span className="metric-value warning-text"><ShieldAlert size={20} /> DECAYED</span>

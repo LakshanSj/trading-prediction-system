@@ -95,7 +95,7 @@ def models_exist(ticker: str, interval: str = "1d") -> bool:
         os.path.exists(os.path.join(PROJECT_ROOT, f"models/lgb_clf_{t}_{i}.txt")) and
         os.path.exists(os.path.join(PROJECT_ROOT, f"models/meta_{t}_{i}.pkl"))
     )
-# In-memory LightGBM model cache: { "ticker_interval" -> { "mtime": float, "lgb_reg": Booster, "lgb_clf": Booster, "meta_info": dict } }
+# In-memory LightGBM model cache: { "ticker_interval" -> { "mtime": float, "lgb_reg": Booster, "lgb_clf": Booster, "meta_info": dict, "regime_reg": dict, "regime_clf": dict } }
 _model_cache = {}
 
 def get_cached_models(ticker: str, interval: str = "1d"):
@@ -114,7 +114,7 @@ def get_cached_models(ticker: str, interval: str = "1d"):
     cached = _model_cache.get(cache_key)
     
     if cached and cached["mtime"] == mtime:
-        return cached["lgb_reg"], cached["lgb_clf"], cached["meta_info"]
+        return cached["lgb_reg"], cached["lgb_clf"], cached["meta_info"], cached["regime_reg"], cached["regime_clf"]
         
     # Reload from disk
     lgb_reg = lgb.Booster(model_file=lgb_reg_path)
@@ -122,13 +122,26 @@ def get_cached_models(ticker: str, interval: str = "1d"):
     with open(meta_path, 'rb') as f:
         meta_info = pickle.load(f)
         
+    regime_reg = {}
+    regime_clf = {}
+    regimes_trained = meta_info.get('regimes_trained', {})
+    for r, trained in regimes_trained.items():
+        if trained:
+            reg_spec_path = os.path.join(PROJECT_ROOT, f"models/lgb_reg_{t}_{i}_regime_{r}.txt")
+            clf_spec_path = os.path.join(PROJECT_ROOT, f"models/lgb_clf_{t}_{i}_regime_{r}.txt")
+            if os.path.exists(reg_spec_path) and os.path.exists(clf_spec_path):
+                regime_reg[int(r)] = lgb.Booster(model_file=reg_spec_path)
+                regime_clf[int(r)] = lgb.Booster(model_file=clf_spec_path)
+                
     _model_cache[cache_key] = {
         "mtime": mtime,
         "lgb_reg": lgb_reg,
         "lgb_clf": lgb_clf,
-        "meta_info": meta_info
+        "meta_info": meta_info,
+        "regime_reg": regime_reg,
+        "regime_clf": regime_clf
     }
-    return lgb_reg, lgb_clf, meta_info
+    return lgb_reg, lgb_clf, meta_info, regime_reg, regime_clf
 
 
 def run_train_task(ticker: str, start_date: str, end_date: str, epochs: int, interval: str = "1d"):
@@ -263,8 +276,8 @@ def get_predictions(ticker: str, interval: str = "1d"):
         t = ticker_upper.lower()
         i = interval.lower()
         
-        # Retrieve cached models to optimize memory and disk read time
-        lgb_reg, lgb_clf, meta_info = get_cached_models(ticker_upper, interval)
+        # Retrieve cached models (including global and regime-specific models)
+        lgb_reg, lgb_clf, meta_info, regime_reg, regime_clf = get_cached_models(ticker_upper, interval)
             
         features_path = os.path.join(PROJECT_ROOT, f"data/features_{t}_{i}.csv")
         if not os.path.exists(features_path):
@@ -277,18 +290,40 @@ def get_predictions(ticker: str, interval: str = "1d"):
         split_idx = int(len(df) * 0.8)
         test_df = df.iloc[split_idx:].copy()
         
-        # Predict on Test set using LightGBM
+        # Predict on Test set using LightGBM and Regime Routing
         feature_cols = meta_info['feature_cols']
-        test_df['Reg_Pred'] = lgb_reg.predict(test_df[feature_cols])
-        test_df['Clf_Pred_Prob'] = lgb_clf.predict(test_df[feature_cols])
+        reg_preds = []
+        clf_pred_probs = []
+        
+        for idx, row in test_df.iterrows():
+            r_label = int(row['Regime_Label']) if 'Regime_Label' in row else 2
+            feat_vector = row[feature_cols].to_frame().T.astype(float)
+            if r_label in regime_reg:
+                reg_preds.append(float(regime_reg[r_label].predict(feat_vector)[0]))
+                clf_pred_probs.append(float(regime_clf[r_label].predict(feat_vector)[0]))
+            else:
+                reg_preds.append(float(lgb_reg.predict(feat_vector)[0]))
+                clf_pred_probs.append(float(lgb_clf.predict(feat_vector)[0]))
+                
+        test_df['Reg_Pred'] = reg_preds
+        test_df['Clf_Pred_Prob'] = clf_pred_probs
         test_df['Clf_Pred_Dir'] = (test_df['Clf_Pred_Prob'] > 0.5).astype(int)
         
         # Make one-step out prediction (tomorrow)
         last_close = float(df.iloc[-1]['Close'])
         latest_features = df[feature_cols].iloc[-1:]
+        latest_regime = int(df.iloc[-1]['Regime_Label']) if 'Regime_Label' in df.columns else 2
+        latest_regime_name = str(df.iloc[-1]['Regime_Name']) if 'Regime_Name' in df.columns else "Sideways"
         
-        predicted_close_next = float(lgb_reg.predict(latest_features)[0])
-        predicted_direction_prob = float(lgb_clf.predict(latest_features)[0])
+        if latest_regime in regime_reg:
+            predicted_close_next = float(regime_reg[latest_regime].predict(latest_features)[0])
+            predicted_direction_prob = float(regime_clf[latest_regime].predict(latest_features)[0])
+            model_used = f"Regime: {latest_regime_name}"
+        else:
+            predicted_close_next = float(lgb_reg.predict(latest_features)[0])
+            predicted_direction_prob = float(lgb_clf.predict(latest_features)[0])
+            model_used = "Global Fallback"
+            
         predicted_direction_next = "Up" if predicted_direction_prob > 0.5 else "Down"
         
         # Check if dataset has intraday dates to determine formatting
@@ -306,6 +341,8 @@ def get_predictions(ticker: str, interval: str = "1d"):
                 "actual": float(row['Close']),
                 "volume": float(row['Volume']),
                 "type": type_name,
+                "regime_label": int(row['Regime_Label']) if 'Regime_Label' in row else 2,
+                "regime_name": str(row['Regime_Name']) if 'Regime_Name' in row else "Sideways",
                 
                 # MAs
                 "sma_10": float(row['SMA_10']) if 'SMA_10' in row else None,
@@ -403,7 +440,9 @@ def get_predictions(ticker: str, interval: str = "1d"):
             "predicted_direction_tomorrow": predicted_direction_next,
             "directional_accuracy": accuracy,
             "history": history,
-            "predictions": predictions
+            "predictions": predictions,
+            "active_regime": latest_regime_name,
+            "model_used": model_used
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate prediction data: {e}")
@@ -419,8 +458,8 @@ def get_explainability(ticker: str, interval: str = "1d"):
         t = ticker_upper.lower()
         i = interval.lower()
         
-        # Retrieve cached models to optimize memory and disk read time
-        _, lgb_model, meta_info = get_cached_models(ticker_upper, interval)
+        # Retrieve cached models (including global and regime-specific models)
+        _, lgb_clf_global, meta_info, _, regime_clf = get_cached_models(ticker_upper, interval)
         
         features_path = os.path.join(PROJECT_ROOT, f"data/features_{t}_{i}.csv")
         if i == "1d" and not os.path.exists(features_path):
@@ -434,9 +473,16 @@ def get_explainability(ticker: str, interval: str = "1d"):
             'MACD', 'MACD_Signal', 'MACD_Hist'
         ])
         
-        # Calculate feature contributions on latest row
+        # Route to specialized classifier if available for the latest regime
+        latest_regime = int(df.iloc[-1]['Regime_Label']) if 'Regime_Label' in df.columns else 2
+        if latest_regime in regime_clf:
+            active_clf = regime_clf[latest_regime]
+        else:
+            active_clf = lgb_clf_global
+            
+        # Calculate feature contributions on latest row using the active classifier
         latest_features = df[feature_cols].iloc[-1:]
-        contrib = lgb_model.predict(latest_features, pred_contrib=True)[0]
+        contrib = active_clf.predict(latest_features, pred_contrib=True)[0]
         
         # Map values to columns
         contributions = []
@@ -450,7 +496,7 @@ def get_explainability(ticker: str, interval: str = "1d"):
         contributions = sorted(contributions, key=lambda x: abs(x["contribution"]), reverse=True)
 
         # Get basic feature importance split
-        importance = lgb_model.feature_importance(importance_type='gain')
+        importance = active_clf.feature_importance(importance_type='gain')
         importances = []
         for col, val in zip(feature_cols, importance):
             importances.append({
